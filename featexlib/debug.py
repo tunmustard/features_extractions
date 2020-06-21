@@ -9,7 +9,7 @@ class Debug():
             self.image = image
             self.label = label
             
-    def show_images_list(image_list, labels = [], cmap = 'gray', col_number = 10, height = 2, save_name=None, save_dir = "Data/saved_images"):
+    def show_images_list(image_list, labels = [], cmap = 'gray', col_number = 10, height = 2, save_name=None, save_dir = "Data/saved_images", vmin=None, vmax=None):
         row = -(-len(image_list)//col_number) 
         fig = plt.figure(figsize=(15, row*height))
         count = 1
@@ -24,7 +24,7 @@ class Debug():
             if isinstance(i, Debug.Image):
                 if image_list[i].label:
                     a.set_title(image_list[i].label)
-                plt.imshow(image_list[i].image, cmap = cmap) 
+                plt.imshow(image_list[i].image, cmap = cmap, vmin=vmin, vmax=vmax) 
             else:
                 if any(labels):
                     a.set_title(labels[i])
@@ -33,10 +33,10 @@ class Debug():
                 plt.imsave(os.path.join(save_dir, "%s_%s.png"%(save_name,i)), image_list[i], cmap = cmap)
             count=count+1
             
-    def show_image(img, cmap = 'gray', no_axis = False):
+    def show_image(img, cmap = 'gray', no_axis = False, vmin=None, vmax=None):
         if no_axis:
             plt.axis('off')
-        plt.imshow(img, cmap = cmap) 
+        plt.imshow(img, cmap = cmap, vmin=vmin, vmax=vmax) 
         
     def scale_to_1(x):
         return (x/255.0)
