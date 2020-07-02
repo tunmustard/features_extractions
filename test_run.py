@@ -280,10 +280,11 @@ class Feature_detection(object):
         print("center_dist_norm.max()",center_dist_norm.max())
         print("center_norm",center_norm)
         if center_norm>self.center_norm_lim and center_dist_norm.max()<self.center_dist_norm_lim:
+            self.ft_buffer = np.zeros( (self.buff_len, ) + self.ft_shape , dtype='float32')             
             return center
         return None
         
-    def get_id(self, inp):  
+    def get_set_id(self, inp):  
         inp = inp[None,...]
         if len(self.id_list) > 0:
             likeness_dist_norm_arr = np.linalg.norm(self.id_list - inp, axis=1)
@@ -298,6 +299,19 @@ class Feature_detection(object):
         else:
             self.id_list = inp
             return len(self.id_list)
+
+    def get_id(self, inp):  
+        inp = inp[None,...]
+        if len(self.id_list) == 0:
+            return None
+        likeness_dist_norm_arr = np.linalg.norm(self.id_list - inp, axis=1)
+        likeness_dist_norm_min = likeness_dist_norm_arr.min()
+        likeness_indice = likeness_dist_norm_arr.argmin()
+        print("likeness_dist_norm_min",likeness_dist_norm_min)
+        if likeness_dist_norm_min < self.likeness_lim:
+            return likeness_indice+1
+        else:
+            return None
         
     def __call__(self, inp):
         
@@ -310,9 +324,9 @@ class Feature_detection(object):
         vector = self.get_vector_from_buffer();
         
         if vector is not None:
-            inp_id = self.get_id(inp)
+            inp_id = self.get_set_id(vector)
         else:
-            inp_id = None
+            inp_id = self.get_id(inp)
         
         return inp_id
 
@@ -888,8 +902,8 @@ class Production_unit(Production):
         self.layer_show_bb = Production.Layer_show_bb(inp_channel_1 = 1, inp_channel_2 = 3, out_channel = 1)
         self.layer_show_id = Production.Layer_add_id(id_module = Feature_detection((256,),
                                                          center_norm_lim=5, 
-                                                         center_dist_norm_lim=5, 
-                                                         likeness_lim = 3
+                                                         center_dist_norm_lim=3, 
+                                                         likeness_lim = 5
                                                         ), inp_channel_1 = 1, inp_channel_2 = 5, out_channel = 1)
         
         ###Initialise pipeline
