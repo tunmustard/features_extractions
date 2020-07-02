@@ -1,8 +1,5 @@
 import cv2 as cv
 from tensorflow.python.eager import backprop
-from tensorflow.python.keras.engine import data_adapter
-from tensorflow.python.keras.mixed_precision.experimental import loss_scale_optimizer as lso
-from tensorflow.python.distribute import parameter_server_strategy
 import tensorflow as tf
 import numpy as np
 import pickle
@@ -31,118 +28,10 @@ import featexlib.datagen as dgen
 tf.compat.v1.enable_eager_execution()
 
 
-###Prepare model
-def unet(pretrained_weights = None,input_size = (256,256,1)):
-    inputs = tf.keras.Input(input_size)
-    conv1 = tf.keras.layers.Conv2D(32, 3, activation = 'relu', padding = 'same', kernel_initializer = 'he_normal')(inputs)
-    conv1 = tf.keras.layers.Conv2D(32, 3, activation = 'relu', padding = 'same', kernel_initializer = 'he_normal')(conv1)
-    pool1 = tf.keras.layers.MaxPooling2D(pool_size=(2, 2))(conv1)
-    conv2 = tf.keras.layers.Conv2D(64, 3, activation = 'relu', padding = 'same', kernel_initializer = 'he_normal')(pool1)
-    conv2 = tf.keras.layers.Conv2D(64, 3, activation = 'relu', padding = 'same', kernel_initializer = 'he_normal')(conv2)
-    pool2 = tf.keras.layers.MaxPooling2D(pool_size=(2, 2))(conv2)
-    conv3 = tf.keras.layers.Conv2D(128, 3, activation = 'relu', padding = 'same', kernel_initializer = 'he_normal')(pool2)
-    conv3 = tf.keras.layers.Conv2D(128, 3, activation = 'relu', padding = 'same', kernel_initializer = 'he_normal')(conv3)
-    pool3 = tf.keras.layers.MaxPooling2D(pool_size=(2, 2))(conv3)
-    conv4 = tf.keras.layers.Conv2D(256, 3, activation = 'relu', padding = 'same', kernel_initializer = 'he_normal')(pool3)
-    conv4 = tf.keras.layers.Conv2D(256, 3, activation = 'relu', padding = 'same', kernel_initializer = 'he_normal')(conv4)
-    drop4 = tf.keras.layers.Dropout(0.2)(conv4)
-    pool4 = tf.keras.layers.MaxPooling2D(pool_size=(2, 2))(drop4)
-
-    conv5 = tf.keras.layers.Conv2D(512, 3, activation = 'relu', padding = 'same', kernel_initializer = 'he_normal')(pool4)
-    conv5 = tf.keras.layers.Conv2D(512, 3, activation = 'relu', padding = 'same', kernel_initializer = 'he_normal')(conv5)
-    drop5 = tf.keras.layers.Dropout(0.2)(conv5)
-
-    up6 = tf.keras.layers.Conv2D(256, 2, activation = 'relu', padding = 'same', kernel_initializer = 'he_normal')(tf.keras.layers.UpSampling2D(size = (2,2))(drop5))
-    merge6 = tf.keras.layers.concatenate([drop4,up6], axis = 3)
-    conv6 = tf.keras.layers.Conv2D(256, 3, activation = 'relu', padding = 'same', kernel_initializer = 'he_normal')(merge6)
-    conv6 = tf.keras.layers.Conv2D(256, 3, activation = 'relu', padding = 'same', kernel_initializer = 'he_normal')(conv6)
-
-    up7 = tf.keras.layers.Conv2D(128, 2, activation = 'relu', padding = 'same', kernel_initializer = 'he_normal')(tf.keras.layers.UpSampling2D(size = (2,2))(conv6))
-    merge7 = tf.keras.layers.concatenate([conv3,up7], axis = 3)
-    conv7 = tf.keras.layers.Conv2D(128, 3, activation = 'relu', padding = 'same', kernel_initializer = 'he_normal')(merge7)
-    conv7 = tf.keras.layers.Conv2D(128, 3, activation = 'relu', padding = 'same', kernel_initializer = 'he_normal')(conv7)
-
-    up8 = tf.keras.layers.Conv2D(64, 2, activation = 'relu', padding = 'same', kernel_initializer = 'he_normal')(tf.keras.layers.UpSampling2D(size = (2,2))(conv7))
-    merge8 = tf.keras.layers.concatenate([conv2,up8], axis = 3)
-    conv8 = tf.keras.layers.Conv2D(64, 3, activation = 'relu', padding = 'same', kernel_initializer = 'he_normal')(merge8)
-    conv8 = tf.keras.layers.Conv2D(64, 3, activation = 'relu', padding = 'same', kernel_initializer = 'he_normal')(conv8)
-
-    up9 = tf.keras.layers.Conv2D(32, 2, activation = 'relu', padding = 'same', kernel_initializer = 'he_normal')(tf.keras.layers.UpSampling2D(size = (2,2))(conv8))
-    merge9 = tf.keras.layers.concatenate([conv1,up9], axis = 3)
-    conv9 = tf.keras.layers.Conv2D(32, 3, activation = 'relu', padding = 'same', kernel_initializer = 'he_normal')(merge9)
-    conv9 = tf.keras.layers.Conv2D(32, 3, activation = 'relu', padding = 'same', kernel_initializer = 'he_normal')(conv9)
-    conv9 = tf.keras.layers.Conv2D(2, 3, activation = 'relu', padding = 'same', kernel_initializer = 'he_normal')(conv9)
-    conv10 = tf.keras.layers.Conv2D(1, 1, activation = 'sigmoid')(conv9)
-
-    model = tf.keras.Model(inputs = inputs, outputs = conv10)
-
-    model.compile(optimizer = tf.keras.optimizers.Adam(lr = 1e-4), loss = 'binary_crossentropy', metrics = ['accuracy'])
-
-    if(pretrained_weights):
-        model.load_weights(pretrained_weights)
-
-    return model
-
-model = unet(pretrained_weights ='./models/dig4_256x256_unet_tiny_acc09886')
-rand = np.random.rand(1,256,256,1).astype("float32")
-res = model(rand)
-print(res)
-del res, rand
-
 pic_h = 32
 pic_w = 84
 num_feat = 256
 num_classes = 2000
-
-###Minimizer taken from tf library. Actually, this code is redundant and can be simplified
-def _minimize(strategy, tape, optimizer, loss, trainable_variables):
-    """Minimizes loss for one step by updating `trainable_variables`.
-    This is roughly equivalent to
-    ```python
-    gradients = tape.gradient(loss, trainable_variables)
-    self.optimizer.apply_gradients(zip(gradients, trainable_variables))
-    ```
-    However, this function also applies gradient clipping and loss scaling if the
-    optimizer is a LossScaleOptimizer.
-    Args:
-    strategy: `tf.distribute.Strategy`.
-    tape: A gradient tape. The loss must have been computed under this tape.
-    optimizer: The optimizer used to minimize the loss.
-    loss: The loss tensor.
-    trainable_variables: The variables that will be updated in order to minimize
-    the loss.
-    """
-
-    with tape:
-        if isinstance(optimizer, lso.LossScaleOptimizer):
-            loss = optimizer.get_scaled_loss(loss)
-
-    gradients = tape.gradient(loss, trainable_variables)
-
-    # Whether to aggregate gradients outside of optimizer. This requires support
-    # of the optimizer and doesn't work with ParameterServerStrategy and
-    # CentralStroageStrategy.
-    aggregate_grads_outside_optimizer = (
-        optimizer._HAS_AGGREGATE_GRAD and  # pylint: disable=protected-access
-        not isinstance(strategy.extended,
-                       parameter_server_strategy.ParameterServerStrategyExtended))
-
-    if aggregate_grads_outside_optimizer:
-        # We aggregate gradients before unscaling them, in case a subclass of
-        # LossScaleOptimizer all-reduces in fp16. All-reducing in fp16 can only be
-        # done on scaled gradients, not unscaled gradients, for numeric stability.
-        gradients = optimizer._aggregate_gradients(zip(gradients,  # pylint: disable=protected-access
-                                                       trainable_variables))
-    if isinstance(optimizer, lso.LossScaleOptimizer):
-        gradients = optimizer.get_unscaled_gradients(gradients)
-    gradients = optimizer._clip_gradients(gradients)  # pylint: disable=protected-access
-    if trainable_variables:
-        if aggregate_grads_outside_optimizer:
-            optimizer.apply_gradients(
-                zip(gradients, trainable_variables),
-                experimental_aggregate_gradients=False)
-        else:
-            optimizer.apply_gradients(zip(gradients, trainable_variables))
 
 ###Model build in low level way
 class Model(tf.keras.Model):
@@ -321,11 +210,11 @@ class Model(tf.keras.Model):
             #loss = self.compiled_loss(y, y_pred, sample_weight, regularization_losses=self.losses)
         
         ###Simple optimiser, not used.
-        #trainable_variables = self.trainable_variables
-        #gradients = tape.gradient(loss, trainable_variables)
-        #self.optimizer.apply_gradients(zip(gradients, trainable_variables))
-        _minimize(self.distribute_strategy, tape, self.optimizer, loss,
-                  self.trainable_variables)
+        trainable_variables = self.trainable_variables
+        gradients = tape.gradient(loss, trainable_variables)
+        self.optimizer.apply_gradients(zip(gradients, trainable_variables))
+        #_minimize(self.distribute_strategy, tape, self.optimizer, loss,
+        #          self.trainable_variables)
         
         ###Update center loss    
         self.centers_update(h_features, y, 0.5) 
@@ -363,7 +252,76 @@ print(res2)
 del res1, res2, rand
 
 
+
+
+
+
+######FEATURE DETERCTION CLASS
+class Feature_detection(object):
+    def __init__(self, feature_shape, buff_len = 5, center_norm_lim=5, center_dist_norm_lim=5, likeness_lim = 3):
+        self.id_list = np.array([])
+        self.ft_shape = feature_shape
+        self.buff_len = buff_len
+        self.ft_buffer = np.zeros( (buff_len, ) + feature_shape , dtype='float32') 
+        self.center_norm_lim = center_norm_lim
+        self.center_dist_norm_lim = center_dist_norm_lim
+        self.likeness_lim = likeness_lim
+
+    def add_to_buffer(self, inp):
+        self.ft_buffer = np.vstack([np.delete(self.ft_buffer, 0, 0),inp])
+
+        
+    def get_vector_from_buffer(self):
+        
+        center = np.mean(self.ft_buffer, axis=0)
+        center_norm = np.linalg.norm(center)
+        center_dist = self.ft_buffer-center
+        center_dist_norm = np.linalg.norm(center_dist, axis=1)
+        print("center_dist_norm.max()",center_dist_norm.max())
+        print("center_norm",center_norm)
+        if center_norm>self.center_norm_lim and center_dist_norm.max()<self.center_dist_norm_lim:
+            return center
+        return None
+        
+    def get_id(self, inp):  
+        inp = inp[None,...]
+        if len(self.id_list) > 0:
+            likeness_dist_norm_arr = np.linalg.norm(self.id_list - inp, axis=1)
+            likeness_dist_norm_min = likeness_dist_norm_arr.min()
+            likeness_indice = likeness_dist_norm_arr.argmin()
+            print("likeness_dist_norm_min",likeness_dist_norm_min)
+            if likeness_dist_norm_min < self.likeness_lim:
+                return likeness_indice+1
+            else:
+                self.id_list = np.vstack([self.id_list,inp])
+                return len(self.id_list)
+        else:
+            self.id_list = inp
+            return len(self.id_list)
+        
+    def __call__(self, inp):
+        
+        if inp is None:
+            inp = np.zeros(self.ft_shape)
+        inp = np.array(inp)
+        
+        self.add_to_buffer(inp)
+        
+        vector = self.get_vector_from_buffer();
+        
+        if vector is not None:
+            inp_id = self.get_id(inp)
+        else:
+            inp_id = None
+        
+        return inp_id
+
+
+
+
 ####Production class 
+###CLASS ORIGIN IS HERE
+
 class Production(object):
     def __init__(self, pipeline):
         self.pipeline = pipeline
@@ -725,10 +683,12 @@ class Production(object):
             output = self.model.forward(self.outputLayers)
             scores = output[0]
             geometry = output[1]
-
+            
             h = process_data.data.shape[0]
             w = process_data.data.shape[1]
 
+            process_data.data = cv.resize((scores.reshape((scores.shape[2],scores.shape[3],1))*255).astype(np.uint8), (w,h), interpolation = cv.INTER_AREA) 
+            
             rW = w / float(self.model_width)
             rH = h / float(self.model_height)
 
@@ -840,9 +800,10 @@ class Production(object):
 
     ###Process layer: show bb on input image
     class Layer_show_bb(Layer_2_inputs):
-        def __init__(self, inp_channel_1 = 1, inp_channel_2 = 2, out_channel = 1):
+        def __init__(self, inp_channel_1 = 1, inp_channel_2 = 2, out_channel = 1, id_module = Feature_detection((256,))):
             super().__init__(inp_channel_1 = inp_channel_1, inp_channel_2 = inp_channel_2, out_channel=out_channel)
-     
+            self.id_module = id_module
+             
         def calc(self, process_data_1, process_data_2):
             if 'fail' in process_data_2.info or "bb" not in process_data_2.info:
                 return process_data_1
@@ -861,7 +822,30 @@ class Production(object):
             np_tlrb = np_tlrb.astype(np.uint)
             t,l,b,r =  np_tlrb[0],np_tlrb[1],np_tlrb[2],np_tlrb[3]     
             process_data_1.data = cv.rectangle(process_data_1.data, (l, t), (r, b), 255, 4)
-            
+            process_data_1.info["bb_abs"] = (t,l,b,r)
+            process_data_1.info.update(process_data_2.info)
+            return process_data_1
+        
+    class Layer_add_id(Layer_2_inputs):
+        def __init__(self, id_module = Feature_detection((256,),
+                                                         center_norm_lim=5, 
+                                                         center_dist_norm_lim=5, 
+                                                         likeness_lim = 3
+                                                        ), inp_channel_1 = 1, inp_channel_2 = 2, out_channel = 1):
+            super().__init__(inp_channel_1 = inp_channel_1, inp_channel_2 = inp_channel_2, out_channel=out_channel)
+            self.id_module = id_module
+             
+        def calc(self, process_data_1, process_data_2):
+            if self.id_module is not None:
+                num_id = self.id_module(process_data_2.data)
+                print("num_id = ",num_id)
+                if "fail" not in process_data_2.info and num_id is not None:
+                    (t,l,b,r) = process_data_1.info["bb_abs"]
+                    t = int(t+50)
+                    l = int(l+10)
+                    font = cv.FONT_HERSHEY_DUPLEX
+                    cv.putText(process_data_1.data, "%s"%num_id, (l, t), font, 2.0, (0, 255, 0), 3)
+
             return process_data_1
         
     #Base class for transfer data between layers
@@ -871,174 +855,70 @@ class Production(object):
             self.info = info
 
 
+
+
+
+
+
+
+
+
+
+
 ###Create process class implementation      
 class Production_unit(Production):
     def __init__(self):
         
         ###Initialize process layers
         self.layer_inp = Production.Layer_input(out_channel = 1)
-        self.layer_1_cut = Production.Layer_cut(t=0,l=128,h=280,w=280, out_channel = 2)
-        self.layer_2_gray = Production.Layer_to_gray(invert=True, inp_channel = 2, out_channel = 2)
+        self.layer_1_cut = Production.Layer_cut(t=0, l=128, h=280, w=280, out_channel = 2)
+        #self.layer_2_gray = Production.Layer_to_gray(invert=True, inp_channel = 2, out_channel = 2)
         #self.layer_3_rgb = Production.Layer_to_rgb(mode="b")
         self.layer_3_resize = Production.Layer_resize(w=256,h=256, inp_channel = 2, out_channel = 2)
         #self.layer_4_normalize = Production.Layer_normalize(mean_shift=0, std_offset_pos=2, std_offset_neg=2, inp_channel = 2, out_channel = 2)
-        #self.layer_5_east_model = Production.Layer_bounding_box_east(pad_h=5, pad_w=5, color_scale = -1, score_threshold = 0.7, nms_treshold = 0.5, inp_channel = 2, out_channel = 3)
-        self.layer_5_scaler = Production.Layer_scaler(file="models/scalers/dig4_256x256_unet_acc09886_scaler.pkl", inp_channel = 2, out_channel = 3, astype='float32')
-        self.layer_6_model = Production.Layer_model(model=model, input_shape = (-1,256,256,1), output_shape = (256,256,1), inp_channel = 3, out_channel = 3)
-        self.layer_7_tresh = Production.Layer_treshold(ll=0.5, lh=1.0, inp_channel = 3, out_channel = 3)
-        self.layer_8_bbox = Production.Layer_bounding_box(pad_h=2, pad_w=2, w_roi_ct=128, w_roi_cl=128, w_k1 = 1, w_k2 = 1, w_sq = 2688, inp_channel = 3, out_channel = 3)
+        self.layer_5_east_model = Production.Layer_bounding_box_east(pad_h=5, pad_w=5, color_scale = -1, score_threshold = 0.5, nms_treshold = 0.4, inp_channel = 2, out_channel = 3)
+        #self.layer_5_scaler = Production.Layer_scaler(file="models/scalers/dig4_256x256_unet_acc09886_scaler.pkl", inp_channel = 2, out_channel = 3, astype='float32')
+        #self.layer_6_model = Production.Layer_model(model=model, input_shape = (-1,256,256,1), output_shape = (256,256,1), inp_channel = 3, out_channel = 3)
+        #self.layer_7_tresh = Production.Layer_treshold(ll=0.5, lh=1.0, inp_channel = 3, out_channel = 3)
+        #self.layer_8_bbox = Production.Layer_bounding_box(pad_h=2, pad_w=2, w_roi_ct=128, w_roi_cl=128, w_k1 = 1, w_k2 = 1, w_sq = 2688, inp_channel = 3, out_channel = 3)
         self.layer_9_cut_resize = Production.Layer_cut_bb_resize_rotate(w=84, h=32, inp_channel_1 = 2, inp_channel_2 = 3, out_channel = 4)
-        #self.layer_9_1_gray = Production.Layer_to_gray(invert=True, inp_channel = 4, out_channel = 4)
+        self.layer_9_1_gray = Production.Layer_to_gray(invert=True, inp_channel = 4, out_channel = 4)
         self.layer_10_scaler = Production.Layer_scaler(file="models/scalers/dig4_256f_e5_cl2000_acc100_on_1000.pkl", inp_channel = 4, out_channel = 5, astype='float32')
         self.layer_11_model = Production.Layer_model_feature(model=model_feat, input_shape = (-1,32,84,1), output_shape = (256), inp_channel = 5, out_channel = 5)
         self.layer_show_bb = Production.Layer_show_bb(inp_channel_1 = 1, inp_channel_2 = 3, out_channel = 1)
+        self.layer_show_id = Production.Layer_add_id(id_module = Feature_detection((256,),
+                                                         center_norm_lim=5, 
+                                                         center_dist_norm_lim=5, 
+                                                         likeness_lim = 3
+                                                        ), inp_channel_1 = 1, inp_channel_2 = 5, out_channel = 1)
         
         ###Initialise pipeline
         self.pipeline = Production.Pipeline_model_feat(
             proc_layers = [
                 self.layer_inp,
                 self.layer_1_cut,
-                self.layer_2_gray,
+                #self.layer_2_gray,
                 self.layer_3_resize,
                 #self.layer_4_normalize,
-                #self.layer_5_east_model,
-                self.layer_5_scaler,
-                self.layer_6_model,
-                self.layer_7_tresh,
-                self.layer_8_bbox,
+                self.layer_5_east_model,
+                #self.layer_5_scaler,
+                #self.layer_6_model,
+                #self.layer_7_tresh,
+                #self.layer_8_bbox,
                 self.layer_9_cut_resize,
-                #self.layer_9_1_gray,
+                self.layer_9_1_gray,
                 self.layer_10_scaler,
                 self.layer_11_model,
-                self.layer_show_bb
+                self.layer_show_bb,
+                self.layer_show_id
             ],
             inp_channel = 1,
-            out_channels = (1,5)
+            out_channels = (1,)
         )
         
         super().__init__(self.pipeline)      
 
-
-production = Production_unit()  
-
-
-
-
-
-class CameraEvent(object):
-    """An Event-like class that signals all active clients when a new frame is
-    available.
-    """
-    def __init__(self):
-        self.events = {}
-
-    def wait(self):
-        """Invoked from each client's thread to wait for the next frame."""
-        ident = get_ident()
-        if ident not in self.events:
-            # this is a new client
-            # add an entry for it in the self.events dict
-            # each entry has two elements, a threading.Event() and a timestamp
-            self.events[ident] = [threading.Event(), time.time()]
-        return self.events[ident][0].wait()
-
-    def set(self):
-        """Invoked by the camera thread when a new frame is available."""
-        now = time.time()
-        remove = None
-        for ident, event in self.events.items():
-            if not event[0].isSet():
-                # if this client's event is not set, then set it
-                # also update the last set timestamp to now
-                event[0].set()
-                event[1] = now
-            else:
-                # if the client's event is already set, it means the client
-                # did not process a previous frame
-                # if the event stays set for more than 5 seconds, then assume
-                # the client is gone and remove it
-                if now - event[1] > 5:
-                    remove = ident
-        if remove:
-            del self.events[remove]
-
-    def clear(self):
-        """Invoked from each client's thread after a frame was processed."""
-        self.events[get_ident()][0].clear()
-        
-        
-class BaseCamera(object):
-    thread = None  # background thread that reads frames from camera
-    frame = None  # current frame is stored here by background thread
-    last_access = 0  # time of last client access to the camera
-    event = CameraEvent()
-
-    def __init__(self):
-        """Start the background camera thread if it isn't running yet."""
-        if BaseCamera.thread is None:
-            BaseCamera.last_access = time.time()
-
-            # start background frame thread
-            BaseCamera.thread = threading.Thread(target=self._thread)
-            BaseCamera.thread.start()
-
-            # wait until frames are available
-            while self.get_frame() is None:
-                time.sleep(1)
-
-    def get_frame(self):
-        """Return the current camera frame."""
-        BaseCamera.last_access = time.time()
-
-        # wait for a signal from the camera thread
-        BaseCamera.event.wait()
-        BaseCamera.event.clear()
-
-        return BaseCamera.frame
-
-    @staticmethod
-    def frames():
-        """"Generator that returns frames from the camera."""
-        raise RuntimeError('Must be implemented by subclasses.')
-
-    @classmethod
-    def _thread(cls):
-        """Camera background thread."""
-        print('Starting camera thread.')
-        frames_iterator = cls.frames()
-        for frame in frames_iterator:
-            BaseCamera.frame = frame
-            BaseCamera.event.set()  # send signal to clients
-            time.sleep(0)
-
-            # if there hasn't been any clients asking for frames in
-            # the last 10 seconds then stop the thread
-            if time.time() - BaseCamera.last_access > 10:
-                frames_iterator.close()
-                print('Stopping camera thread due to inactivity.')
-                break
-        BaseCamera.thread = None
-
-class Camera_compare(BaseCamera):
-    video_source = 0
-
-    @staticmethod
-    def frames(pipeline=production):
-        camera = cv.VideoCapture(gstreamer_pipeline(flip_method=2), cv.CAP_GSTREAMER)
-        
-        if not camera.isOpened():
-            raise RuntimeError('Could not start camera.')
-        
-        while True:
-            # read current frame
-            _, frame = camera.read()
-
-            frame = pipeline(frame)[0].data
-	
-		
-            # Convert the image from BGR color (which OpenCV uses) to RGB color (which face_recognition uses)
-            #rgb_frame = frame[:, :, ::-1]  
-            yield cv.imencode('.jpg', frame)[1].tobytes()
+production = Production_unit()
 
             
 def gstreamer_pipeline(
@@ -1068,30 +948,30 @@ def gstreamer_pipeline(
         )
     )
 
-#cap = cv.VideoCapture(gstreamer_pipeline(flip_method=2), cv.CAP_GSTREAMER)
-#if cap.isOpened():
-    #ret_val, img = cap.read()
-    #cap.release()
-    
-#    window_handle = cv.namedWindow("CSI Camera", cv.WINDOW_AUTOSIZE)
+cap = cv.VideoCapture(gstreamer_pipeline(flip_method=2), cv.CAP_GSTREAMER)
+if cap.isOpened():
+    window_handle = cv.namedWindow("CSI Camera", cv.WINDOW_AUTOSIZE)
     # Window
-#    while cv.getWindowProperty("CSI Camera", 0) >= 0:
-#        img = production(img)[0].data
-#        cv.imshow("CSI Camera", img)
+    while cv.getWindowProperty("CSI Camera", 0) >= 0:
+        ret_val, img = cap.read()
+        
+        img = production(img)[0].data
+        cv.imshow("CSI Camera", img)
         # This also acts as
-#        keyCode = cv.waitKey(30) & 0xFF
+        keyCode = cv.waitKey(30) & 0xFF
         # Stop the program on the ESC key
-#        if keyCode == 27:
-#            break
-#    cv.destroyAllWindows()
-#else:
-#    print("Unable to open camera")
+        if keyCode == 27:
+            break
+    cap.release()    
+    cv.destroyAllWindows()
+else:
+    print("Unable to open camera")
 
 
 
-img = (np.random.rand(308,408,3)*255).astype("uint8")
-img = production(img)[0].data
-print("done", img.shape)
+#img = (np.random.rand(308,408,3)*255).astype("uint8")
+#img = production(img)[0].data
+#print("done", img.shape)
 
 # Window
 #window_handle = cv.namedWindow("CSI Camera", cv.WINDOW_AUTOSIZE)
