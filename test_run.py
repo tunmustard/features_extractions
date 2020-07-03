@@ -710,7 +710,7 @@ class Production(object):
 
             indices = cv.dnn.NMSBoxesRotated(rects, confidences, self.score_threshold, self.nms_treshold)
             
-            if indices:
+            if len(indices)>0:
                 #Take first indice
                 i = indices[0]
 
@@ -841,11 +841,7 @@ class Production(object):
             return process_data_1
         
     class Layer_add_id(Layer_2_inputs):
-        def __init__(self, id_module = Feature_detection((256,),
-                                                         center_norm_lim=5, 
-                                                         center_dist_norm_lim=5, 
-                                                         likeness_lim = 3
-                                                        ), inp_channel_1 = 1, inp_channel_2 = 2, out_channel = 1):
+        def __init__(self, id_module = Feature_detection((256,)), inp_channel_1 = 1, inp_channel_2 = 2, out_channel = 1):
             super().__init__(inp_channel_1 = inp_channel_1, inp_channel_2 = inp_channel_2, out_channel=out_channel)
             self.id_module = id_module
              
@@ -890,7 +886,7 @@ class Production_unit(Production):
         #self.layer_3_rgb = Production.Layer_to_rgb(mode="b")
         self.layer_3_resize = Production.Layer_resize(w=256,h=256, inp_channel = 2, out_channel = 2)
         #self.layer_4_normalize = Production.Layer_normalize(mean_shift=0, std_offset_pos=2, std_offset_neg=2, inp_channel = 2, out_channel = 2)
-        self.layer_5_east_model = Production.Layer_bounding_box_east(pad_h=5, pad_w=5, color_scale = -1, score_threshold = 0.5, nms_treshold = 0.4, inp_channel = 2, out_channel = 3)
+        self.layer_5_east_model = Production.Layer_bounding_box_east(pad_h=5, pad_w=5, color_scale = -1.1, score_threshold = 0.5, nms_treshold = 0.4, inp_channel = 2, out_channel = 3)
         #self.layer_5_scaler = Production.Layer_scaler(file="models/scalers/dig4_256x256_unet_acc09886_scaler.pkl", inp_channel = 2, out_channel = 3, astype='float32')
         #self.layer_6_model = Production.Layer_model(model=model, input_shape = (-1,256,256,1), output_shape = (256,256,1), inp_channel = 3, out_channel = 3)
         #self.layer_7_tresh = Production.Layer_treshold(ll=0.5, lh=1.0, inp_channel = 3, out_channel = 3)
@@ -902,8 +898,9 @@ class Production_unit(Production):
         self.layer_show_bb = Production.Layer_show_bb(inp_channel_1 = 1, inp_channel_2 = 3, out_channel = 1)
         self.layer_show_id = Production.Layer_add_id(id_module = Feature_detection((256,),
                                                          center_norm_lim=5, 
-                                                         center_dist_norm_lim=3, 
-                                                         likeness_lim = 5
+                                                         center_dist_norm_lim=2.5, 
+                                                         likeness_lim = 4,
+                                                         buff_len = 6
                                                         ), inp_channel_1 = 1, inp_channel_2 = 5, out_channel = 1)
         
         ###Initialise pipeline
