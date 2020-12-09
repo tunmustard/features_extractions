@@ -1,0 +1,13 @@
+{% extends "layout.html" %}
+{% block body %}
+  <h1>Report IDs</h1>
+
+  {% if 'username' in session: %}
+	<table cellpadding="7" border="2">
+	<tr><td>ID</td><td>Image</td></tr>
+	</table>
+	<p>In progress</p>
+  {% else %}
+  	<p>No access. Do you want to <a href="{{ url_for('login') }}">log in?</a></p>
+  {% endif %}
+{% endblock %}

@@ -1,8 +1,0 @@
-{% extends "layout.html" %}
-{% block body %}
-  <h1>Stream</h1>
-	<p><img src="{{ url_for('video_feed') }}"></p>
-  {% if 'username' in session: %}
-	<p>logged in</p>
-  {% endif %}
-{% endblock %}
