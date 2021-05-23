@@ -1,7 +1,7 @@
 import os
 import matplotlib.pyplot as plt
 import numpy as np
-
+###This is class origin. Please use this class.
 ###Helpful class for debuging. Shows images, convert image batches as matrix to rgb, rescales...
 class Debug():
     class Image():
