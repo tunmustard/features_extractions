@@ -2,6 +2,7 @@ import os
 import numpy as np
 import glob
 import cv2 as cv
+import re
 from math import pi
 
 ###Specian class for image transformation and augmentation
@@ -439,16 +440,38 @@ class Image_generator(object):
     def rgb_to_gray(inp, rgb_weights = [0.2989, 0.5870, 0.1140], invert = False):
         return 255-np.dot(inp[...,:3], rgb_weights) if invert else np.dot(inp[...,:3], rgb_weights)
     
-    def load_from_folder(save_dir = "Data/images", ext="", size = None):
-        def open_image(f, size=None):
-            img = cv.imread(f, cv.IMREAD_UNCHANGED)
-            if size:
-                img = cv.resize(img, size, interpolation = cv.INTER_AREA) 
-            return img
-        
-        list_of_files = [f for f in glob.glob(f"{save_dir}/*{ext}")]             
-        out = np.array([ open_image(f,size) for f in list_of_files if os.path.isfile(f)])
+    #Help fulction for loading images and resizing
+    def open_image(f, size=None, cv_read_mode = cv.IMREAD_UNCHANGED):
+        img = cv.imread(f, cv_read_mode)
+        if size:
+            img = cv.resize(img, size, interpolation = cv.INTER_AREA) 
+        return img
+    
+    ###Load images from folder. With OpenCV reading mode options, name filtering and resizing
+    #cv.IMREAD_UNCHANGED If set, return the loaded image as is (with alpha channel, otherwise it gets cropped). Ignore EXIF orientation.
+    #cv.IMREAD_GRAYSCALE If set, always convert image to the single channel grayscale image (codec internal conversion).
+    #cv.IMREAD_COLOR If set, always convert image to the 3 channel BGR color image.
+    #cv.IMREAD_ANYDEPTH If set, return 16-bit/32-bit image when the input has the corresponding depth, otherwise convert it to 8-bit.
+    #cv.IMREAD_ANYCOLOR If set, the image is read in any possible color format.
+    #cv.IMREAD_LOAD_GDAL If set, use the gdal driver for loading the image.
+    #cv.IMREAD_REDUCED_COLOR_2 If set, always convert image to the 3 channel BGR color image and the image size reduced 1/2.
+    ##EXAMPLE: file_filter_regex = r'\d*\.png$'
+    def load_from_folder(save_dir = "Data/images", file_filter_regex= r'' , size = None, cv_read_mode = cv.IMREAD_UNCHANGED):
+        list_of_files = [f for f in glob.glob(f"{save_dir}/*") if re.search(file_filter_regex, f) and os.path.isfile(f)]         
+        out = np.array([ Image_generator.open_image(f, size=size, cv_read_mode=cv_read_mode) for f in list_of_files])
         return out
+    
+    ###Load images and make labels from file names
+    #EXAMPLE: label_regex = r'/(\d+)\.(cs\.)?png'  for ../00001.cs.png
+    #Group number for regex search default = 1 (first () entry)
+    def load_from_folder_make_lables(save_dir = "Data/images", file_filter_regex = r'', label_regex = r'/(\d+)\.(cs\.)?png', 
+                                     size = None, file_filter_group_num = 1, cv_read_mode = cv.IMREAD_UNCHANGED): 
+        list_of_files = [f for f in glob.glob(f"{save_dir}/*") if re.search(file_filter_regex, f) and os.path.isfile(f)]         
+        out_labels = [re.search(label_regex, f).group(file_filter_group_num) if re.search(label_regex, f) else None for f in list_of_files]
+
+        out_x = np.array([ Image_generator.open_image(f, size=size, cv_read_mode=cv_read_mode) for f in list_of_files])
+        
+        return out_x, out_labels
     
     def get_random_bg_from_set(inp, w, h):
         rand = (np.random.rand(3)*[inp.shape[0], inp.shape[1]-h, inp.shape[2]-w]).astype(int)
