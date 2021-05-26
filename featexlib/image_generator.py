@@ -5,6 +5,7 @@ import cv2 as cv
 import re
 from math import pi
 
+###CLASS ORIGIN IS IN NOTEBOOK, DO NOT EDIT
 ###Specian class for image transformation and augmentation
 class Image_generator(object):
     def __init__(self, pipeline):
@@ -12,9 +13,9 @@ class Image_generator(object):
         self.num_class_samples = None
         self.pipeline = pipeline
         
-    def __call__(self, inp, shuffle = False):
+    def __call__(self, *args, shuffle = False):
         #Execute pipeline
-        pl1_x, pl1_y = self.pipeline(inp)
+        pl1_x, pl1_y = self.pipeline(*args)
         
         #Set some data
         self.num_classes = self.pipeline.num_classes
@@ -175,6 +176,47 @@ class Image_generator(object):
             del inp_common, out_mask_common
             
             return result_x, result_y  
+
+    ###Pipeline for source image dataset (x) and target (y) image dataset
+    class Pipeline_x_y_images(Pipeline):
+        def __init__(self, common_layers, special_layers):
+            super().__init__(common_layers, special_layers)
+        def __call__(self, inp_x, inp_y):
+            inp_x_common = inp_x
+            inp_y_common = inp_y
+            inp_trans_x_dict = {}
+            inp_trans_y_dict = {}
+            
+            for i in self.common_layers:
+                inp_x_common, inp_trans_x_dict = i(inp_x_common, inp_trans_x_dict, target="x")
+                inp_y_common, inp_trans_y_dict = i(inp_y_common, inp_trans_y_dict, target="y")
+            
+            result_x = []
+            result_y = [] 
+            
+            #Generate X and Y images output
+            for p in self.special_layers:
+                out_x = np.copy(inp_x_common)
+                out_y = np.copy(inp_y_common)
+                out_trans_dict = inp_trans_x_dict.copy()
+                
+                for i in p:
+                    out_x, out_trans_dict = i(out_x, out_trans_dict, target="x")
+                    out_y, _ = i(out_y, out_trans_dict, target="y", use_saved = True)
+                
+                result_x.append(out_x) 
+                result_y.append(out_y)
+                del out_x, out_y, out_trans_dict 
+            
+            result_x = np.concatenate(result_x, axis=0)
+            result_y = np.concatenate(result_y, axis=0)
+            
+            self.num_classes = 1
+            self.num_class_samples = int(result_x.shape[0])
+            
+            del inp_x_common, inp_y_common
+            
+            return result_x, result_y 
         
     #Base class for all tranformation layers
     class Mod(object):
@@ -212,16 +254,35 @@ class Image_generator(object):
             super().__init__(target=target)
             self.padd = (pl,pr,pt,pb)
         def calc(self, inp, trans_dict, use_saved=False):
-            #expect input matrix with shape (-1, a, b)
-            inp_shape = list(inp.shape)
-            inp_shape_l = (inp_shape[0],inp_shape[1], self.padd[0])
-            inp_shape_r = (inp_shape[0],inp_shape[1], self.padd[1])
-            inp_shape_t = (inp_shape[0],self.padd[2], inp_shape[2]+self.padd[0]+self.padd[1])
-            inp_shape_b = (inp_shape[0],self.padd[3], inp_shape[2]+self.padd[0]+self.padd[1])
+            #expect input matrix with shape (-1, a, b,...)
             self.trans_dict["extra_padding"] = self.padd
             trans_dict.update(self.trans_dict)
-            return np.concatenate([np.zeros(inp_shape_t), np.concatenate([np.zeros(inp_shape_l), inp, np.zeros(inp_shape_r)], axis=2), np.zeros(inp_shape_b)], axis=1), trans_dict
-    
+            return np.pad(inp,[(0,0),(self.padd[2],self.padd[3]),(self.padd[0],self.padd[1])] + [(0,0) for k in range(len(inp.shape)-3)],"constant"), trans_dict
+
+    #Resize images
+    class Mod_resize(Mod):
+        def __init__(self, size, target="all"):
+            super().__init__(target=target)
+            self.size = size
+        def calc(self, inp, trans_dict, use_saved=False):
+            self.trans_dict["resize"] = self.size 
+            trans_dict.update(self.trans_dict)
+            return np.concatenate([[cv.resize(i, self.size, interpolation = cv.INTER_AREA)] for i in inp],axis=0), trans_dict
+        
+    #Crop image
+    class Mod_crop(Mod):
+        def __init__(self, t, l, h, w, target="all"):
+            super().__init__(target=target)
+            self.t, self.l, self.h, self.w = t,l,h,w
+        def calc(self, inp, trans_dict, use_saved=False):
+            self.trans_dict["crop"] = [self.t, self.l, self.h, self.w]
+            trans_dict.update(self.trans_dict)
+            
+            b=self.t+self.h if self.t+self.h<=inp.shape[1] else inp.shape[1]
+            r=self.l+self.w if self.l+self.w<=inp.shape[2] else inp.shape[2]
+            
+            return inp[:,self.t:b,self.l:r,...], trans_dict
+      
     #Perspective transformation
     class Mod_linear_transf(Mod):
         ###l,r,t,b percentage of shrinking in corrersponding side (left, right, top, bottom)
