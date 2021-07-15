@@ -1,5 +1,5 @@
-####Production class 
-###CLASS ORIGIN IS HERE
+###Production class 
+###CLASS ORIGIN IS IN NOTEBOOK, IN PROJECT BILLID, DO NOT EDIT HERE
 
 import pickle
 import numpy as np

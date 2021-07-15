@@ -1,3 +1,6 @@
+###Specian class for image transformation and augmentation
+###CLASS ORIGIN IS IN NOTEBOOK, IN PROJECT BILLID, DO NOT EDIT HERE
+
 import os
 import numpy as np
 import glob
@@ -5,8 +8,6 @@ import cv2 as cv
 import re
 from math import pi
 
-###CLASS ORIGIN IS IN NOTEBOOK, DO NOT EDIT
-###Specian class for image transformation and augmentation
 class Image_generator(object):
     def __init__(self, pipeline):
         self.num_classes = None

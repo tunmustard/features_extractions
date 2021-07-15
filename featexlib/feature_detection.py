@@ -1,5 +1,5 @@
-###CLASS ORIGIN IS HERE
 ###Special class for finding similar feature vectors
+###CLASS ORIGIN IS IN NOTEBOOK, IN PROJECT BILLID, DO NOT EDIT HERE
 
 import numpy as np
 
