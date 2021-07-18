@@ -35,59 +35,85 @@ tf.compat.v1.enable_eager_execution()
 
 ###Loading models
 def unet(pretrained_weights = None,input_size = (256,256,3)):
-    inputs = tf.keras.Input(input_size)
-    conv1 = tf.keras.layers.Conv2D(64, 3, activation = 'relu', padding = 'same', kernel_initializer = 'he_normal')(inputs)
-    conv1 = tf.keras.layers.Conv2D(64, 3, activation = 'relu', padding = 'same', kernel_initializer = 'he_normal')(conv1)
-    pool1 = tf.keras.layers.MaxPooling2D(pool_size=(2, 2))(conv1)
-    conv2 = tf.keras.layers.Conv2D(128, 3, activation = 'relu', padding = 'same', kernel_initializer = 'he_normal')(pool1)
-    conv2 = tf.keras.layers.Conv2D(128, 3, activation = 'relu', padding = 'same', kernel_initializer = 'he_normal')(conv2)
-    pool2 = tf.keras.layers.MaxPooling2D(pool_size=(2, 2))(conv2)
-    conv3 = tf.keras.layers.Conv2D(256, 3, activation = 'relu', padding = 'same', kernel_initializer = 'he_normal')(pool2)
-    conv3 = tf.keras.layers.Conv2D(256, 3, activation = 'relu', padding = 'same', kernel_initializer = 'he_normal')(conv3)
-    pool3 = tf.keras.layers.MaxPooling2D(pool_size=(2, 2))(conv3)
-    conv4 = tf.keras.layers.Conv2D(512, 3, activation = 'relu', padding = 'same', kernel_initializer = 'he_normal')(pool3)
-    conv4 = tf.keras.layers.Conv2D(512, 3, activation = 'relu', padding = 'same', kernel_initializer = 'he_normal')(conv4)
-    drop4 = tf.keras.layers.Dropout(0.5)(conv4)
-    pool4 = tf.keras.layers.MaxPooling2D(pool_size=(2, 2))(drop4)
-
-    conv5 = tf.keras.layers.Conv2D(1024, 3, activation = 'relu', padding = 'same', kernel_initializer = 'he_normal')(pool4)
-    conv5 = tf.keras.layers.Conv2D(1024, 3, activation = 'relu', padding = 'same', kernel_initializer = 'he_normal')(conv5)
-    drop5 = tf.keras.layers.Dropout(0.5)(conv5)
-
-    up6 = tf.keras.layers.Conv2D(512, 2, activation = 'relu', padding = 'same', kernel_initializer = 'he_normal')(tf.keras.layers.UpSampling2D(size = (2,2))(drop5))
-    merge6 = tf.keras.layers.concatenate([drop4,up6], axis = 3)
-    conv6 = tf.keras.layers.Conv2D(512, 3, activation = 'relu', padding = 'same', kernel_initializer = 'he_normal')(merge6)
-    conv6 = tf.keras.layers.Conv2D(512, 3, activation = 'relu', padding = 'same', kernel_initializer = 'he_normal')(conv6)
-
-    up7 = tf.keras.layers.Conv2D(256, 2, activation = 'relu', padding = 'same', kernel_initializer = 'he_normal')(tf.keras.layers.UpSampling2D(size = (2,2))(conv6))
-    merge7 = tf.keras.layers.concatenate([conv3,up7], axis = 3)
-    conv7 = tf.keras.layers.Conv2D(256, 3, activation = 'relu', padding = 'same', kernel_initializer = 'he_normal')(merge7)
-    conv7 = tf.keras.layers.Conv2D(256, 3, activation = 'relu', padding = 'same', kernel_initializer = 'he_normal')(conv7)
-
-    up8 = tf.keras.layers.Conv2D(128, 2, activation = 'relu', padding = 'same', kernel_initializer = 'he_normal')(tf.keras.layers.UpSampling2D(size = (2,2))(conv7))
-    merge8 = tf.keras.layers.concatenate([conv2,up8], axis = 3)
-    conv8 = tf.keras.layers.Conv2D(128, 3, activation = 'relu', padding = 'same', kernel_initializer = 'he_normal')(merge8)
-    conv8 = tf.keras.layers.Conv2D(128, 3, activation = 'relu', padding = 'same', kernel_initializer = 'he_normal')(conv8)
-
-    up9 = tf.keras.layers.Conv2D(64, 2, activation = 'relu', padding = 'same', kernel_initializer = 'he_normal')(tf.keras.layers.UpSampling2D(size = (2,2))(conv8))
-    merge9 = tf.keras.layers.concatenate([conv1,up9], axis = 3)
-    conv9 = tf.keras.layers.Conv2D(64, 3, activation = 'relu', padding = 'same', kernel_initializer = 'he_normal')(merge9)
-    conv9 = tf.keras.layers.Conv2D(64, 3, activation = 'relu', padding = 'same', kernel_initializer = 'he_normal')(conv9)
-    conv9 = tf.keras.layers.Conv2D(2, 3, activation = 'relu', padding = 'same', kernel_initializer = 'he_normal')(conv9)
-    conv10 = tf.keras.layers.Conv2D(1, 1, activation = 'sigmoid')(conv9)
-
-    model = tf.keras.Model(inputs = inputs, outputs = conv10)
-
-    model.compile(optimizer = tf.keras.optimizers.Adam(lr = 1e-4), loss = 'binary_crossentropy', metrics = ['accuracy'])
+    VGG16_weight = "./models/vgg16_weights_tf_dim_ordering_tf_kernels_notop.h5"
+    VGG16 = tf.keras.applications.VGG16(include_top=False, weights=VGG16_weight, input_shape=input_size)
+    last_layer = VGG16.output
     
-    #model.summary()
+    set_trainable = False
+    for layer in VGG16.layers:
+        if layer.name in ['block1_conv1']:
+            set_trainable = True
+        if layer.name in ['block1_pool','block2_pool','block3_pool','block4_pool','block5_pool']:
+            layer.trainable = False
+            
+    model_ = tf.keras.layers.Conv2DTranspose(256,(3,3),strides=(2, 2), padding='same')(last_layer)
+    model_ = tf.keras.layers.LeakyReLU(0.1)(model_)
+    model_ = tf.keras.layers.BatchNormalization()(model_)    
+    
+    concat_1 = tf.keras.layers.concatenate([model_,VGG16.get_layer("block5_conv3").output])
+    
+    model_ = tf.keras.layers.Conv2D(512,(3,3),strides=(1, 1), padding='same')(concat_1)
+    model_ = tf.keras.layers.LeakyReLU(0.1)(model_)
+    model_ = tf.keras.layers.BatchNormalization()(model_)
+    
+    model_ = tf.keras.layers.Conv2DTranspose(512,(3,3),strides=(2, 2),padding='same')(model_)
+    model_ = tf.keras.layers.LeakyReLU(0.1)(model_)
+    model_ = tf.keras.layers.BatchNormalization()(model_) 
+    
+    concat_2 = tf.keras.layers.concatenate([model_,VGG16.get_layer("block4_conv3").output])
+    
+    model_ = tf.keras.layers.Conv2D(512,(3,3),strides=(1, 1), padding='same')(concat_2)
+    model_ = tf.keras.layers.LeakyReLU(0.1)(model_)
+    model_ = tf.keras.layers.BatchNormalization()(model_)
+    
+    model_ = tf.keras.layers.Conv2DTranspose(512,(3,3),strides=(2, 2), padding='same')(model_)
+    model_ = tf.keras.layers.LeakyReLU(0.1)(model_)
+    model_ = tf.keras.layers.BatchNormalization()(model_) 
+    
+    concat_3 = tf.keras.layers.concatenate([model_,VGG16.get_layer("block3_conv3").output])
+    
+    model_ = tf.keras.layers.Conv2D(256,(3,3),strides=(1, 1), padding='same')(concat_3)
+    model_ = tf.keras.layers.LeakyReLU(0.1)(model_)
+    model_ = tf.keras.layers.BatchNormalization()(model_)
+    
+    model_ = tf.keras.layers.Conv2DTranspose(256,(3,3),strides=(2, 2),padding='same')(model_)
+    model_ = tf.keras.layers.LeakyReLU(0.1)(model_)
+    model_ = tf.keras.layers.BatchNormalization()(model_) 
+    
+    concat_4 = tf.keras.layers.concatenate([model_,VGG16.get_layer("block2_conv2").output])
+    
+    model_ = tf.keras.layers.Conv2D(128,(3,3),strides=(1, 1), padding='same')(concat_4)
+    model_ = tf.keras.layers.LeakyReLU(0.1)(model_)
+    model_ = tf.keras.layers.BatchNormalization()(model_)
+    
+    model_ = tf.keras.layers.Conv2DTranspose(128,(3,3),strides=(2, 2),padding='same')(model_)
+    model_ = tf.keras.layers.LeakyReLU(0.1)(model_)
+    model_ = tf.keras.layers.BatchNormalization()(model_) 
+    
+    concat_5 = tf.keras.layers.concatenate([model_,VGG16.get_layer("block1_conv2").output])
+    
+    model_ = tf.keras.layers.Conv2D(64,(3,3),strides=(1, 1), padding='same')(concat_5)
+    model_ = tf.keras.layers.LeakyReLU(0.1)(model_)
+    model_ = tf.keras.layers.BatchNormalization()(model_)
+    
+    '''model_ = tf.keras.layers.Conv2D(32,(3,3),strides=(1, 1), padding='same')(model_)
+    model_ = tf.keras.layers.LeakyReLU(0.1)(model_)
+    model_ = tf.keras.layers.BatchNormalization()(model_)'''
+    
+    model_ = tf.keras.layers.Conv2D(1,(3,3),strides=(1, 1),padding='same')(model_)
+    model_ = tf.keras.layers.LeakyReLU(0.1)(model_)
+    model_ = tf.keras.layers.BatchNormalization()(model_)
+    
+    model_ = tf.keras.Model(VGG16.input,model_)
+    
+    model_.compile(optimizer = tf.keras.optimizers.Adam(lr = 1e-4), loss = 'binary_crossentropy', metrics = ['accuracy'])
 
     if(pretrained_weights):
-        model.load_weights(pretrained_weights)
+        model_.load_weights(pretrained_weights)
+    
+    return model_
 
-    return model
-
-model = unet(pretrained_weights ='./models/billid_256x256_unet_acc09852')
+model = unet(pretrained_weights ='./models/billid_256x256_unet_vgg16_acc09649')
        
        
        
@@ -183,7 +209,10 @@ if cap.isOpened():
     while cv.getWindowProperty("CSI Camera", 0) >= 0:
         ret_val, img = cap.read()
         
-        img_mask =  np.concatenate([np.zeros((256,256,1)),np.zeros((256,256,1)),production(img)[3].data], axis=2)
+        result = production(img)[3].data
+        
+        #img_mask =  np.concatenate([np.zeros((256,256,1)),np.zeros((256,256,1)),result], axis=2)
+        img_mask =  np.concatenate([result,result,result], axis=2)
         #img = production(img)[1].data
         
         #cv.imshow("CSI Camera", img+
