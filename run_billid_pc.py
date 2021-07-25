@@ -113,7 +113,7 @@ def unet(pretrained_weights = None,input_size = (256,256,3)):
     
     return model_
 
-model = unet(pretrained_weights ='./models/billid_256x256_unet_vgg16_acc09649')
+model = unet(pretrained_weights ='./models/billid_256x256_unet_vgg16_v_01')
        
        
        
@@ -208,6 +208,8 @@ if cap.isOpened():
     # Window
     while cv.getWindowProperty("CSI Camera", 0) >= 0:
         ret_val, img = cap.read()
+        
+        img = img[...,[2,1,0]]
         
         result = production(img)[3].data
         
