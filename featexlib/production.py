@@ -2,6 +2,7 @@
 ###CLASS ORIGIN IS HERE
 
 import pickle
+from typing import Type
 import numpy as np
 import copy
 import cv2 as cv
@@ -196,8 +197,8 @@ class Production(object):
             
             if 'fail' in process_data.info:
                 return process_data
-            
-            result = self.model(process_data.data.reshape(self.input_shape)).numpy()
+               
+            result = np.array(self.model(process_data.data.reshape(self.input_shape)))
             
             if self.output_shape is not None:
                 result = result.reshape(self.output_shape)
@@ -221,10 +222,12 @@ class Production(object):
             
             _, features = self.model(process_data.data.reshape(self.input_shape))
             
+            features = np.array(features)
+            print(features.shape)
             if self.output_shape is not None:
-                result = features.numpy().reshape(self.output_shape)
+                result = features.reshape(self.output_shape)
             else:
-                result = features.numpy().reshape(self.input_shape[1:])
+                result = features.reshape(self.input_shape[1:])
                 
             process_data.data = result
             return process_data
