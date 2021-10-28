@@ -1,5 +1,5 @@
 ###Specian class for image transformation and augmentation
-###CLASS ORIGIN IS IN NOTEBOOK, IN PROJECT BILLID, DO NOT EDIT HERE
+###CLASS ORIGIN IS HERE
 
 import os
 import numpy as np

@@ -1,5 +1,5 @@
 ###Production class 
-###CLASS ORIGIN IS IN NOTEBOOK, IN PROJECT BILLID, DO NOT EDIT HERE
+###CLASS ORIGIN IS HERE
 
 import pickle
 import numpy as np
@@ -152,13 +152,17 @@ class Production(object):
 
     ###Process layer: resize
     class Layer_resize(Layer):
-        def __init__(self, w, h, inp_channel = 1, out_channel = 1):
+        def __init__(self, w, h, inp_channel = 1, out_channel = 1, output_shape = None):
             super().__init__(inp_channel = inp_channel, out_channel = out_channel)  
             self.w, self.h = w, h
+            self.output_shape = output_shape
             
         def calc(self, process_data):
             process_data.info["transform_chain"].append(("resize",(process_data.data.shape[1]/self.w,process_data.data.shape[0]/self.h)))
             process_data.data = cv.resize(process_data.data, (self.w,self.h), interpolation = cv.INTER_AREA) 
+            
+            if self.output_shape is not None:
+                process_data.data = process_data.data.reshape(self.output_shape)
             return process_data 
         
     ###Process layer: scaler

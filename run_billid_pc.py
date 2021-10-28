@@ -34,17 +34,15 @@ tf.compat.v1.enable_eager_execution()
        
 
 ###Loading models
-def unet(pretrained_weights = None,input_size = (256,256,3)):
+def unet(pretrained_weights = None,input_size = (256,256,3), full_train=False):
     VGG16_weight = "./models/vgg16_weights_tf_dim_ordering_tf_kernels_notop.h5"
     VGG16 = tf.keras.applications.VGG16(include_top=False, weights=VGG16_weight, input_shape=input_size)
     last_layer = VGG16.output
-    
-    set_trainable = False
     for layer in VGG16.layers:
         if layer.name in ['block1_conv1']:
             set_trainable = True
         if layer.name in ['block1_pool','block2_pool','block3_pool','block4_pool','block5_pool']:
-            layer.trainable = False
+            layer.trainable = full_train
             
     model_ = tf.keras.layers.Conv2DTranspose(256,(3,3),strides=(2, 2), padding='same')(last_layer)
     model_ = tf.keras.layers.LeakyReLU(0.1)(model_)
@@ -96,9 +94,9 @@ def unet(pretrained_weights = None,input_size = (256,256,3)):
     model_ = tf.keras.layers.LeakyReLU(0.1)(model_)
     model_ = tf.keras.layers.BatchNormalization()(model_)
     
-    '''model_ = tf.keras.layers.Conv2D(32,(3,3),strides=(1, 1), padding='same')(model_)
+    model_ = tf.keras.layers.Conv2D(32,(3,3),strides=(1, 1), padding='same')(model_)
     model_ = tf.keras.layers.LeakyReLU(0.1)(model_)
-    model_ = tf.keras.layers.BatchNormalization()(model_)'''
+    model_ = tf.keras.layers.BatchNormalization()(model_)
     
     model_ = tf.keras.layers.Conv2D(1,(3,3),strides=(1, 1),padding='same')(model_)
     model_ = tf.keras.layers.LeakyReLU(0.1)(model_)
@@ -106,7 +104,7 @@ def unet(pretrained_weights = None,input_size = (256,256,3)):
     
     model_ = tf.keras.Model(VGG16.input,model_)
     
-    model_.compile(optimizer = tf.keras.optimizers.Adam(lr = 1e-4), loss = 'binary_crossentropy', metrics = ['accuracy'])
+    model_.compile(optimizer = tf.keras.optimizers.Adam(lr = 1e-4), loss = 'categorical_hinge', metrics = ['accuracy'])
 
     if(pretrained_weights):
         model_.load_weights(pretrained_weights)
@@ -146,7 +144,9 @@ class Production_unit(Production):
         #                                                 center_dist_norm_lim=5, 
         #                                                 likeness_lim = 3
         #                                                ), inp_channel_1 = 1, inp_channel_2 = 5, out_channel = 1)
-        
+        self.layer_12_resize = Production.Layer_resize(w=512,h=512, inp_channel = 7, out_channel = 7, output_shape = (512,512,1))
+        self.layer_13_resize = Production.Layer_resize(w=512,h=512, inp_channel = 2, out_channel = 2, output_shape = (512,512,3))
+
         ###Initialise pipeline
         self.pipeline = Production.Pipeline_model_feat(
             proc_layers = [
@@ -165,7 +165,9 @@ class Production_unit(Production):
                 #self.layer_10_scaler,
                 #self.layer_11_model,
                 #self.layer_show_bb,
-                #self.layer_show_id
+                #self.layer_show_id,
+                self.layer_12_resize,
+                self.layer_13_resize
             ],
             inp_channel = 1,
             out_channels = (1,2,3,7)
@@ -209,16 +211,30 @@ if cap.isOpened():
     while cv.getWindowProperty("CSI Camera", 0) >= 0:
         ret_val, img = cap.read()
         
-        img = img[...,[2,1,0]]
+        #img = img[...,[2,1,0]]
         
         result = production(img)[3].data
+        orig_img = production(img)[1].data
+
+        #Constants for rescaling brightness to 0-255
+        result_mean = 0#-0.5555854 
+        result_std = 1.2982033 
+        result_std_color_level = 127 #eg: std(0)....mean(127)....+std(255)
+        clippin_limit = 255
+
+        result = (np.clip(((result - result_mean + result_std)/result_std)*result_std_color_level, 0, clippin_limit)).astype('uint8')
+
+        #print(result.max())
+        #print(result.min())
+
+        img_mask =  np.clip(np.concatenate([result,result,result], axis=2), 0, clippin_limit).astype('uint8')
+        #img_mask = (np.clip(np.concatenate([orig_img[:,:,[0]],orig_img[:,:,[1]],orig_img[:,:,[2]]]+result, axis=2), 0, clippin_limit)).astype('uint8')
+        img_combined = np.concatenate((img_mask,orig_img),axis=1) 
         
-        #img_mask =  np.concatenate([np.zeros((256,256,1)),np.zeros((256,256,1)),result], axis=2)
-        img_mask =  np.concatenate([result,result,result], axis=2)
-        #img = production(img)[1].data
-        
-        #cv.imshow("CSI Camera", img+
-        cv.imshow("CSI Camera", img_mask)
+        #cv.imshow("CSI Camera", img_mask)
+        #cv.imshow("CSI Camera", orig_img)
+        cv.imshow("CSI Camera", img_combined)
+
         # This also acts as
         keyCode = cv.waitKey(30) & 0xFF
         # Stop the program on the ESC key
