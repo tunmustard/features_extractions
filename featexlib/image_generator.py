@@ -523,6 +523,51 @@ class Image_generator(object):
         out = np.array([ Image_generator.open_image(f, size=size, cv_read_mode=cv_read_mode) for f in list_of_files])
         return out
     
+    ###Load images from folder for x and y simultaniously. Check if correspondig pair-image exists. With OpenCV reading mode options, name filtering and resizing.
+    def load_from_folders_xy(save_dir_x = "Data/images/x", save_dir_y = "Data/images/y", file_filter_regex= r'' , size = None, cv_read_mode = cv.IMREAD_UNCHANGED):
+        #Make y blob list
+        list_of_files_y = {f:None for f in glob.glob(f"{save_dir_y}/*") if os.path.isfile(f)}  
+        list_of_files_x = {f:re.search(file_filter_regex, f).group(1) for f in glob.glob(f"{save_dir_x}/*") if os.path.isfile(f) and re.search(file_filter_regex, f)}  
+        
+        #Find partner imeage x<->y
+        for path_x, path_y in list_of_files_x.items():
+            regex_y = r'/'+path_y+'\.\w+'
+            find_result = [s for s in list_of_files_y if re.search(regex_y, s)]
+            list_of_files_x[path_x] = find_result[0] if any(find_result) else None
+            if any(find_result):
+                list_of_files_y[find_result[0]]=1
+        
+        no_x_partner_list = [k for (k,v) in list_of_files_x.items() if v is None]
+        no_y_partner_list = [k for (k,v) in list_of_files_y.items() if v is None]
+        
+        print('Totally %s pair images found'%(len(list_of_files_x)))
+        
+        if any(no_x_partner_list):
+            print('WARNING: Following x has no y images:\n\r',no_x_partner_list)
+        if any(no_y_partner_list):
+            print('WARNING: Following y has no x images:\n\r',no_y_partner_list)
+            
+        #Old code
+        '''
+        #Generate dict{x:y}, check if x name exist in y folder. y may have different file extention
+        list_of_files_x = dict([
+            
+            (f,[i for i in list_of_files_y if re.search(r'/'+re.search(file_filter_regex, f).group(1)+'\.\w+', i)][0])
+            if re.search(file_filter_regex, f) 
+            and any(re.search(r'/'+re.search(file_filter_regex, f).group(1)+'\.\w+', s) for s in list_of_files_y) 
+            and os.path.isfile(f)
+            else (f, None)
+            for f in glob.glob(f"{save_dir_x}/*") 
+            ])         
+        list_of_files_x = {k:v for (k,v) in list_of_files_x.items() if v is not None}
+        '''
+        #Filter the result dict
+        list_of_files_x = {k:v for (k,v) in list_of_files_x.items() if v is not None}
+        
+        out_x = np.array([ Image_generator.open_image(f, size=size, cv_read_mode=cv_read_mode) for f in list_of_files_x.keys()])
+        out_y = np.array([ Image_generator.open_image(f, size=size, cv_read_mode=cv_read_mode) for f in list_of_files_x.values()])
+        return out_x, out_y   
+    
     ###Load images and make labels from file names
     #EXAMPLE: label_regex = r'/(\d+)\.(cs\.)?png'  for ../00001.cs.png
     #Group number for regex search default = 1 (first () entry)
