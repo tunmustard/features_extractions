@@ -262,13 +262,14 @@ class Image_generator(object):
 
     #Resize images
     class Mod_resize(Mod):
-        def __init__(self, size, target="all"):
+        def __init__(self, size, target="all", interpolation = cv.INTER_AREA):
             super().__init__(target=target)
             self.size = size
+            self.interpolation = interpolation
         def calc(self, inp, trans_dict, use_saved=False):
             self.trans_dict["resize"] = self.size 
             trans_dict.update(self.trans_dict)
-            return np.concatenate([[cv.resize(i, self.size, interpolation = cv.INTER_AREA)] for i in inp],axis=0), trans_dict
+            return np.concatenate([[cv.resize(i, self.size, interpolation = self.interpolation)] for i in inp],axis=0), trans_dict
         
     #Crop image
     class Mod_crop(Mod):
@@ -485,19 +486,29 @@ class Image_generator(object):
         return x_out, y_out
     
     #Saves data to file
-    def save_data(inp_x, inp_y, save_dir = "Data/saved_data", name = "exported_data"):
+    def save_data(inp_x, inp_y, inp_extra = None, save_dir = "Data/saved_data", name = "exported_data"):
         if not os.path.exists(save_dir):
             os.makedirs(save_dir)
         with open(os.path.join(save_dir, "%s.npy"%(name)), 'wb') as f:
             np.save(f, inp_x)
             np.save(f, inp_y)
+            if inp_extra is not None:
+                np.save(f, inp_extra)
             
     #Load data from
     def load_data(save_dir = "Data/saved_data", name = "exported_data"):
         with open(os.path.join(save_dir, "%s.npy"%(name)), 'rb') as f:
             out_x = np.load(f)
             out_y = np.load(f)
-        return out_x, out_y
+            out_extra = None
+            try:
+                out_extra = np.load(f)
+            except ValueError:
+                pass
+        if out_extra is not None:
+            return out_x, out_y, out_extra
+        else:
+            return out_x, out_y
     
     def rgb_to_gray(inp, rgb_weights = [0.2989, 0.5870, 0.1140], invert = False):
         return 255-np.dot(inp[...,:3], rgb_weights) if invert else np.dot(inp[...,:3], rgb_weights)
