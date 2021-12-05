@@ -9,35 +9,39 @@ class Debug():
         def __init__(self,image,label=""):
             self.image = image
             self.label = label
-            
-    def show_images_list(image_list, labels = [], cmap = 'gray', col_number = 10, height = 2, save_name=None, save_dir = "Data/saved_images", vmin=None, vmax=None):
+    
+    def swap_rgb_colors(inp, swap=True):
+            return inp[...,[2,1,0]] if inp.shape[-1] == 3 and swap else inp
+    
+    def show_images_list(image_list, labels = [], cmap = 'gray', col_number = 10, height = 2, save_name=None, save_dir = "Data/saved_images", vmin=None, vmax=None, swap=True):
         row = -(-len(image_list)//col_number) 
         fig = plt.figure(figsize=(15, row*height))
         count = 1
         
         if save_name:
             if not os.path.exists(save_dir):
+                print('malkibng dir')
                 os.makedirs(save_dir)
-        
+
         for i in range(len(image_list)):
             a = fig.add_subplot(row, col_number, count)
             plt.axis('off')
             if isinstance(i, Debug.Image):
                 if image_list[i].label:
                     a.set_title(image_list[i].label)
-                plt.imshow(image_list[i].image, cmap = cmap, vmin=vmin, vmax=vmax) 
+                plt.imshow(Debug.swap_rgb_colors(image_list[i].image, swap=swap), cmap = cmap, vmin=vmin, vmax=vmax) 
             else:
                 if any(labels):
                     a.set_title(labels[i])
-                out_img = plt.imshow(image_list[i], cmap = cmap) 
+                out_img = plt.imshow(Debug.swap_rgb_colors(image_list[i], swap=swap), cmap = cmap) 
             if save_name:
-                plt.imsave(os.path.join(save_dir, "%s_%s.png"%(save_name,i)), image_list[i], cmap = cmap)
+                plt.imsave(os.path.join(save_dir, "%s_%s.png"%(save_name,i)), Debug.swap_rgb_colors(image_list[i], swap=swap), cmap = cmap)
             count=count+1
             
-    def show_image(img, cmap = 'gray', no_axis = False, vmin=None, vmax=None):
+    def show_image(img, cmap = 'gray', no_axis = False, vmin=None, vmax=None, swap=True):
         if no_axis:
             plt.axis('off')
-        plt.imshow(img, cmap = cmap, vmin=vmin, vmax=vmax) 
+        plt.imshow(Debug.swap_rgb_colors(img, swap=swap), cmap = cmap, vmin=vmin, vmax=vmax) 
         
     def scale_to_1(x):
         return (x/255.0)

@@ -3,9 +3,9 @@
 
 import os
 import numpy as np
-import glob
 import cv2 as cv
 import re
+import glob
 from math import pi
 
 class Image_generator(object):
@@ -514,10 +514,10 @@ class Image_generator(object):
         return 255-np.dot(inp[...,:3], rgb_weights) if invert else np.dot(inp[...,:3], rgb_weights)
     
     #Help fulction for loading images and resizing
-    def open_image(f, size=None, cv_read_mode = cv.IMREAD_UNCHANGED):
+    def open_image(f, size=None, cv_read_mode = cv.IMREAD_UNCHANGED, interp=cv.INTER_AREA):
         img = cv.imread(f, cv_read_mode)
         if size:
-            img = cv.resize(img, size, interpolation = cv.INTER_AREA) 
+            img = cv.resize(img, size, interpolation = interp) 
         return img
     
     ###Load images from folder. With OpenCV reading mode options, name filtering and resizing
@@ -529,17 +529,17 @@ class Image_generator(object):
     #cv.IMREAD_LOAD_GDAL If set, use the gdal driver for loading the image.
     #cv.IMREAD_REDUCED_COLOR_2 If set, always convert image to the 3 channel BGR color image and the image size reduced 1/2.
     ##EXAMPLE: file_filter_regex = r'\d*\.png$'
-    def load_from_folder(save_dir = "Data/images", file_filter_regex= r'' , size = None, cv_read_mode = cv.IMREAD_UNCHANGED):
-        list_of_files = [f for f in glob.glob(f"{save_dir}/*") if re.search(file_filter_regex, f) and os.path.isfile(f)]         
-        out = np.array([ Image_generator.open_image(f, size=size, cv_read_mode=cv_read_mode) for f in list_of_files])
+    def load_from_folder(save_dir = "Data/images", file_filter_regex= r'' , size = None, cv_read_mode = cv.IMREAD_UNCHANGED, recursive=False, interp=cv.INTER_AREA):
+        list_of_files = [f for f in glob.glob(f"{save_dir}/**", recursive=recursive) if re.search(file_filter_regex, f) and os.path.isfile(f)]         
+        out = np.array([ Image_generator.open_image(f, size=size, cv_read_mode=cv_read_mode, interp = interp) for f in list_of_files])
         return out
-    
+
     ###Load images from folder for x and y simultaniously. Check if correspondig pair-image exists. With OpenCV reading mode options, name filtering and resizing.
-    def load_from_folders_xy(save_dir_x = "Data/images/x", save_dir_y = "Data/images/y", file_filter_regex= r'' , size = None, cv_read_mode = cv.IMREAD_UNCHANGED):
+    def load_from_folders_xy(save_dir_x = "Data/images/x", save_dir_y = "Data/images/y", file_filter_regex= r'' , size = None, cv_read_mode = cv.IMREAD_UNCHANGED, recursive=False, interp_x=cv.INTER_AREA, interp_y=cv.INTER_AREA):
         #Make y blob list
-        list_of_files_y = {f:None for f in glob.glob(f"{save_dir_y}/*") if os.path.isfile(f)}  
-        list_of_files_x = {f:re.search(file_filter_regex, f).group(1) for f in glob.glob(f"{save_dir_x}/*") if os.path.isfile(f) and re.search(file_filter_regex, f)}  
-        
+        list_of_files_y = {f:None for f in glob.glob(f"{save_dir_y}/**", recursive=recursive) if os.path.isfile(f)}  
+        list_of_files_x = {f:re.search(file_filter_regex, f).group(1) for f in glob.glob(f"{save_dir_x}/**", recursive=recursive) if os.path.isfile(f) and re.search(file_filter_regex, f)} 
+
         #Find partner imeage x<->y
         for path_x, path_y in list_of_files_x.items():
             regex_y = r'/'+path_y+'\.\w+'
@@ -557,34 +557,20 @@ class Image_generator(object):
             print('WARNING: Following x has no y images:\n\r',no_x_partner_list)
         if any(no_y_partner_list):
             print('WARNING: Following y has no x images:\n\r',no_y_partner_list)
-            
-        #Old code
-        '''
-        #Generate dict{x:y}, check if x name exist in y folder. y may have different file extention
-        list_of_files_x = dict([
-            
-            (f,[i for i in list_of_files_y if re.search(r'/'+re.search(file_filter_regex, f).group(1)+'\.\w+', i)][0])
-            if re.search(file_filter_regex, f) 
-            and any(re.search(r'/'+re.search(file_filter_regex, f).group(1)+'\.\w+', s) for s in list_of_files_y) 
-            and os.path.isfile(f)
-            else (f, None)
-            for f in glob.glob(f"{save_dir_x}/*") 
-            ])         
-        list_of_files_x = {k:v for (k,v) in list_of_files_x.items() if v is not None}
-        '''
+
         #Filter the result dict
         list_of_files_x = {k:v for (k,v) in list_of_files_x.items() if v is not None}
         
-        out_x = np.array([ Image_generator.open_image(f, size=size, cv_read_mode=cv_read_mode) for f in list_of_files_x.keys()])
-        out_y = np.array([ Image_generator.open_image(f, size=size, cv_read_mode=cv_read_mode) for f in list_of_files_x.values()])
+        out_x = np.array([ Image_generator.open_image(f, size=size, cv_read_mode=cv_read_mode, interp=interp_x) for f in list_of_files_x.keys()])
+        out_y = np.array([ Image_generator.open_image(f, size=size, cv_read_mode=cv_read_mode, interp=interp_y) for f in list_of_files_x.values()])
         return out_x, out_y   
     
     ###Load images and make labels from file names
     #EXAMPLE: label_regex = r'/(\d+)\.(cs\.)?png'  for ../00001.cs.png
     #Group number for regex search default = 1 (first () entry)
     def load_from_folder_make_lables(save_dir = "Data/images", file_filter_regex = r'', label_regex = r'/(\d+)\.(cs\.)?png', 
-                                     size = None, file_filter_group_num = 1, cv_read_mode = cv.IMREAD_UNCHANGED): 
-        list_of_files = [f for f in glob.glob(f"{save_dir}/*") if re.search(file_filter_regex, f) and os.path.isfile(f)]         
+                                     size = None, file_filter_group_num = 1, cv_read_mode = cv.IMREAD_UNCHANGED, recursive=False): 
+        list_of_files = [f for f in glob.glob(f"{save_dir}/**", recursive=recursive) if re.search(file_filter_regex, f) and os.path.isfile(f)]         
         out_labels = [re.search(label_regex, f).group(file_filter_group_num) if re.search(label_regex, f) else None for f in list_of_files]
 
         out_x = np.array([ Image_generator.open_image(f, size=size, cv_read_mode=cv_read_mode) for f in list_of_files])
