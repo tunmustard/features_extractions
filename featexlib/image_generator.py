@@ -6,6 +6,7 @@ import numpy as np
 import cv2 as cv
 import re
 import glob
+import pickle
 from math import pi
 
 class Image_generator(object):
@@ -234,7 +235,32 @@ class Image_generator(object):
         ###Calc should be overwritten in subclass
         def calc(self, inp, trans_dict, use_saved=False):
             return inp, trans_dict     
-            
+
+    ###Preprocess layer: scaler
+    class Mod_scaler(Mod):
+        def __init__(self, file="", astype=None, target="x"):
+            super().__init__(target=target) 
+            self.scaler = pickle.load(open(file,'rb'))
+            self.astype = astype
+        def calc(self, inp, trans_dict, use_saved=False):
+            inp_shape = inp.shape
+            inp = (self.scaler.transform(inp.reshape(inp.shape[0],-1))).reshape(inp_shape)
+            self.trans_dict["scaler"] = True
+            trans_dict.update(self.trans_dict)
+            if self.astype is not None:
+                inp = inp.astype(self.astype)
+
+            return inp, trans_dict 
+
+    ###Preprocess layer: astype
+    class Mod_astype(Mod):
+        def __init__(self, astype, target="all"):
+            super().__init__(target=target) 
+            self.astype = astype
+        def calc(self, inp, trans_dict, use_saved=False):
+            self.trans_dict["astype"] = self.astype
+            return inp.astype(self.astype), trans_dict 
+
     #Combine input digits to one long image
     class Mod_combinator(Mod):
         def __init__(self, num_digits, delete_side_margin = 0, target="all"):
@@ -262,15 +288,70 @@ class Image_generator(object):
 
     #Resize images
     class Mod_resize(Mod):
-        def __init__(self, size, target="all", interpolation = cv.INTER_AREA):
+        def __init__(self, size, target="all", interpolation = cv.INTER_AREA, interpolation_saved = None):
             super().__init__(target=target)
             self.size = size
             self.interpolation = interpolation
+            self.interpolation_saved = interpolation if interpolation_saved is None else interpolation_saved
         def calc(self, inp, trans_dict, use_saved=False):
             self.trans_dict["resize"] = self.size 
             trans_dict.update(self.trans_dict)
-            return np.concatenate([[cv.resize(i, self.size, interpolation = self.interpolation)] for i in inp],axis=0), trans_dict
+            
+            interpolation = self.interpolation_saved if use_saved else self.interpolation
+
+            return np.concatenate([[cv.resize(i, self.size, interpolation = interpolation)] for i in inp],axis=0), trans_dict
         
+
+    #Reshape images
+    ###e.g. shape=(-1, 1071, 3557, 1) or shape=(...,None)
+    class Mod_reshape(Mod):
+        def __init__(self, shape, target="all"):
+            super().__init__(target=target)
+            self.shape = shape
+        def calc(self, inp, trans_dict, use_saved=False):
+            if ... in self.shape:
+                return inp[self.shape], trans_dict
+            else:
+                return inp.reshape(self.shape), trans_dict
+
+    #Split images in subimage
+    class Mod_split(Mod):
+        def __init__(self, size, target="all"):
+            super().__init__(target=target)
+            self.split_size_x, self.split_size_y = size[0], size[1]
+
+        def calc(self, inp, trans_dict, use_saved=False):
+            c_x_split_num = inp.shape[1]//self.split_size_x
+            c_y_split_num = inp.shape[2]//self.split_size_y
+
+            assert c_x_split_num>0 and c_y_split_num>0, "Split size of the image is too big"
+            self.trans_dict["split"] = [self.split_size_x, self.split_size_y]
+            trans_dict.update(self.trans_dict)
+
+            split_result = np.split(inp, [(i+1)*self.split_size_x for i in range(c_x_split_num)], axis=1)[:c_x_split_num]
+            split_result = np.concatenate(split_result,axis=0)
+            split_result = np.split(split_result, [(i+1)*self.split_size_y for i in range(c_y_split_num)], axis=2)[:c_y_split_num]
+            split_result = np.concatenate(split_result,axis=0)
+            return split_result, trans_dict
+
+    #Dulicate images N times
+    class Mod_duplicate(Mod):
+        def __init__(self, num=2, target="all"):
+            super().__init__(target=target)
+            self.num = num
+
+        def calc(self, inp, trans_dict, use_saved=False):
+
+            self.trans_dict["duplicate"] = self.num
+            trans_dict.update(self.trans_dict)
+            
+            duplicate_result = inp
+
+            for i in range(self.num-1):
+                duplicate_result = np.concatenate([duplicate_result,duplicate_result], axis=0)
+
+            return duplicate_result, trans_dict
+
     #Crop image
     class Mod_crop(Mod):
         def __init__(self, t, l, h, w, target="all"):
@@ -284,7 +365,7 @@ class Image_generator(object):
             r=self.l+self.w if self.l+self.w<=inp.shape[2] else inp.shape[2]
             
             return inp[:,self.t:b,self.l:r,...], trans_dict
-      
+
     #Perspective transformation
     class Mod_linear_transf(Mod):
         ###l,r,t,b percentage of shrinking in corrersponding side (left, right, top, bottom)
@@ -314,14 +395,21 @@ class Image_generator(object):
     #Rotate
     class Mod_rotate(Mod):
         ###angle, random
-        def __init__(self, angle=20.0, rand = False, target="all"):
+        def __init__(self, angle=20.0, rand = False, target="all", interpolation = cv.INTER_AREA, interpolation_saved = None, borderValue=0, borderValue_saved=None):
             super().__init__(target=target)
             self.in_angle = angle
             self.rand = rand
+            self.borderValue = borderValue
+            self.borderValue_saved = borderValue if borderValue_saved is None else borderValue_saved
+            self.interpolation = interpolation
+            self.interpolation_saved = interpolation if interpolation_saved is None else interpolation_saved
         def calc(self, inp, trans_dict, use_saved=False):
             w,h = inp.shape[2],inp.shape[1]
             image_center = (w/2,h/2)
             
+            interpolation = self.interpolation_saved if use_saved else self.interpolation
+            borderValue = self.borderValue_saved if use_saved else self.borderValue
+
             if not use_saved:
                 self.saved_angle = [self.in_angle if not self.rand else self.in_angle * (np.random.rand(1)*2 - 1) for i in inp]
                 self.shift_matrix = [cv.getRotationMatrix2D(image_center, int(self.saved_angle[num]), 1.0) for num,i in enumerate(inp)]
@@ -331,27 +419,35 @@ class Image_generator(object):
             tan = np.tan(2*pi*np.array(self.saved_angle)/360)
             self.trans_dict["sin_cos_tan"] = np.concatenate([sin,cos,tan], axis=1)
             trans_dict.update(self.trans_dict)
-            return np.array([cv.warpAffine(i, self.shift_matrix[num], (w,h), flags=cv.INTER_LINEAR) for num,i in enumerate(inp)]), trans_dict
+            return np.array([cv.warpAffine(i, self.shift_matrix[num], (w,h), flags=interpolation, borderValue = borderValue) for num,i in enumerate(inp)]), trans_dict
         
     #Shift
     class Mod_shift(Mod):
         ###sh_h, sh_v
-        def __init__(self, sh_h=20, sh_v=10, rand = False, target="all"):
+        def __init__(self, sh_h=20, sh_v=10, rand = False, target="all", interpolation = cv.INTER_AREA, interpolation_saved = None, borderValue=0, borderValue_saved=None):
             super().__init__(target)
             self.sh_h = sh_h
             self.sh_v = sh_v
             self.rand = rand
+            self.borderValue = borderValue
+            self.borderValue_saved = borderValue if borderValue_saved is None else borderValue_saved
+            self.interpolation = interpolation
+            self.interpolation_saved = interpolation if interpolation_saved is None else interpolation_saved
         def calc(self, inp, trans_dict, use_saved=False):
             w,h = inp.shape[2],inp.shape[1]
             image_center = (w/2,h/2)
             self.trans_dict["shift"] = (self.sh_h, self.sh_v, self.rand)
             trans_dict.update(self.trans_dict)
             
+            interpolation = self.interpolation_saved if use_saved else self.interpolation
+            borderValue = self.borderValue_saved if use_saved else self.borderValue
+
             if not use_saved:
                 self.shift_matrix = np.float32([[[1,0, self.sh_h * (2*np.random.rand(1)-1) if self.rand else self.sh_h],
                                             [0,1, self.sh_v * (2*np.random.rand(1)-1) if self.rand else self.sh_v]] for i in inp])
+
             return np.array(
-                [cv.warpAffine(i, self.shift_matrix[num] ,(w,h),flags=cv.INTER_LINEAR) for num, i in enumerate(inp)]
+                [cv.warpAffine(i, self.shift_matrix[num] ,(w,h),flags=interpolation,  borderValue = borderValue) for num, i in enumerate(inp)]
             ), trans_dict
 
     #Create recangle
@@ -476,14 +572,65 @@ class Image_generator(object):
             self.trans_dict["noise"] = (self.mean, self.std, self.ll, self.hl, self.lim)
             trans_dict.update(self.trans_dict)
             return out.astype(int), trans_dict
-        
+
+    ###Preprocess layer: shuffle
+    class Mod_shuffle(Mod):
+        def __init__(self, shuffle=True, target="all"):
+            super().__init__(target=target) 
+            self.shuffle = shuffle
+        def calc(self, inp, trans_dict, use_saved=False):
+            if self.shuffle:
+                if not use_saved:
+                    self.random = np.random.permutation(len(inp))
+                self.trans_dict["shuffle"] = self.shuffle
+                return inp[self.random], trans_dict 
+            else:
+                return inp[self.random], trans_dict 
+
+    ###Preprocess layer: One hot vector transformation 
+    class Mod_one_hot(Mod):
+        def __init__(self, list_of_codes, rgb_mode = False, target="y"):
+            super().__init__(target=target) 
+            self.list_of_codes = list_of_codes
+            self.rgb_mode = rgb_mode
+
+        def calc(self, inp, trans_dict, use_saved=False):
+            self.trans_dict["one_hot"] = True
+
+            y_colors = np.array([])
+            if self.rgb_mode:
+                y_colors = (inp[:,:,:,0]*65536+inp[:,:,:,1]*256+inp[:,:,:,2])[...,None] 
+            else:
+                if len(inp.shape) < 4:
+                    y_colors = inp.reshape(-1,inp.shape[-2],inp.shape[-1],1)
+                else:
+                    y_colors = inp
+            out = []
+            for c in self.list_of_codes:
+                out.append((y_colors==c).astype(int)) 
+            return np.concatenate(out, axis=3), trans_dict
+
+    ###Making RBG y pics from one hot coded multichannel data
+    def one_hot_to_rgb(inp, list_of_codes_colors):
+        #Help function to get RGB codes from DEC
+        list_of_colors = np.array([[i//65536,(i - 65536*(i//65536))//256, i - 65536*(i//65536) - 256*((i - 65536*(i//65536))//256)] for i in list_of_codes_colors]).astype(np.uint8)
+
+        res_r = np.argmax(inp, axis=3)
+        res_g = np.copy(res_r)
+        res_b = np.copy(res_r)
+
+        for c in range(inp.shape[-1]):
+            res_r[res_r == c] =  list_of_colors[c,0]
+            res_g[res_g == c] =  list_of_colors[c,1]
+            res_b[res_b == c] =  list_of_colors[c,2]
+
+        return np.concatenate([res_r[...,None],res_g[...,None],res_b[...,None]], axis=3)
+
     #Shuffle both arrays X and Y together and outputs them reshuffled
     def shuffle_x_y(self, inp_x, inp_y):   
-        combo = np.c_[inp_x.reshape(len(inp_x), -1), inp_y.reshape(len(inp_y), -1)]
-        np.random.shuffle(combo)
-        x_out = combo[:, :inp_x.size//len(inp_x)].reshape(inp_x.shape)
-        y_out = combo[:, inp_x.size//len(inp_x):].reshape(inp_y.shape)
-        return x_out, y_out
+        assert len(inp_x) == len(inp_y)
+        p = np.random.permutation(len(inp_x))
+        return inp_x[p], inp_y[p]
     
     #Saves data to file
     def save_data(inp_x, inp_y, inp_extra = None, save_dir = "Data/saved_data", name = "exported_data"):
@@ -496,8 +643,9 @@ class Image_generator(object):
                 np.save(f, inp_extra)
             
     #Load data from
-    def load_data(save_dir = "Data/saved_data", name = "exported_data"):
-        with open(os.path.join(save_dir, "%s.npy"%(name)), 'rb') as f:
+    def load_data(save_dir = "Data/saved_data", name = "exported_data", path=None, extension='.npy'):
+        path = path if path is not None else os.path.join(save_dir, "%s%s"%(name,extension))
+        with open(path, 'rb') as f:
             out_x = np.load(f)
             out_y = np.load(f)
             out_extra = None
@@ -535,14 +683,21 @@ class Image_generator(object):
         return out
 
     ###Load images from folder for x and y simultaniously. Check if correspondig pair-image exists. With OpenCV reading mode options, name filtering and resizing.
-    def load_from_folders_xy(save_dir_x = "Data/images/x", save_dir_y = "Data/images/y", file_filter_regex= r'' , size = None, cv_read_mode = cv.IMREAD_UNCHANGED, recursive=False, interp_x=cv.INTER_AREA, interp_y=cv.INTER_AREA):
+    ##TODO: Refactoring
+    def load_from_folders_xy(save_dir_x = "Data/images/x", save_dir_y = "Data/images/y", name_list = None, file_filter_regex= r'' , size = None, cv_read_mode = cv.IMREAD_UNCHANGED, recursive=False, interp_x=cv.INTER_AREA, interp_y=cv.INTER_AREA):
         #Make y blob list
         list_of_files_y = {f:None for f in glob.glob(f"{save_dir_y}/**", recursive=recursive) if os.path.isfile(f)}  
         list_of_files_x = {f:re.search(file_filter_regex, f).group(1) for f in glob.glob(f"{save_dir_x}/**", recursive=recursive) if os.path.isfile(f) and re.search(file_filter_regex, f)} 
 
-        #Find partner imeage x<->y
-        for path_x, path_y in list_of_files_x.items():
-            regex_y = r'/'+path_y+'\.\w+'
+        if name_list is not None:
+            list_of_files_x = { k:v for (k,v) in list_of_files_x.items() if v in name_list}
+            print('Totally %s x images found from name list'%(len(list_of_files_x)))
+        else:
+            print('Totally %s x images found'%(len(list_of_files_x)))
+
+        #Find partner image x<->y
+        for path_x, name_x in list_of_files_x.items():
+            regex_y = r'/'+name_x+'\.\w+'
             find_result = [s for s in list_of_files_y if re.search(regex_y, s)]
             list_of_files_x[path_x] = find_result[0] if any(find_result) else None
             if any(find_result):
@@ -551,20 +706,23 @@ class Image_generator(object):
         no_x_partner_list = [k for (k,v) in list_of_files_x.items() if v is None]
         no_y_partner_list = [k for (k,v) in list_of_files_y.items() if v is None]
         
-        print('Totally %s pair images found'%(len(list_of_files_x)))
-        
         if any(no_x_partner_list):
             print('WARNING: Following x has no y images:\n\r',no_x_partner_list)
-        if any(no_y_partner_list):
+        if any(no_y_partner_list) and name_list is None:
             print('WARNING: Following y has no x images:\n\r',no_y_partner_list)
 
         #Filter the result dict
         list_of_files_x = {k:v for (k,v) in list_of_files_x.items() if v is not None}
-        
+        print('Valid amount of pairs %s '%(len(list_of_files_x)))
+
         out_x = np.array([ Image_generator.open_image(f, size=size, cv_read_mode=cv_read_mode, interp=interp_x) for f in list_of_files_x.keys()])
         out_y = np.array([ Image_generator.open_image(f, size=size, cv_read_mode=cv_read_mode, interp=interp_y) for f in list_of_files_x.values()])
         return out_x, out_y   
     
+    ###Get file names from folder with desired regex mask. e.g. r'/([^/]+)\.json'.
+    def get_file_names_in_folder(files_dir = "Data/images/", recursive=True, file_filter_regex = r'/([^/]+)\.json'):
+        return [re.search(file_filter_regex, f).group(1) for f in glob.glob(f"{files_dir}/**", recursive=recursive) if os.path.isfile(f) and re.search(file_filter_regex, f)] 
+
     ###Load images and make labels from file names
     #EXAMPLE: label_regex = r'/(\d+)\.(cs\.)?png'  for ../00001.cs.png
     #Group number for regex search default = 1 (first () entry)

@@ -20,7 +20,6 @@ class Debug():
         
         if save_name:
             if not os.path.exists(save_dir):
-                print('malkibng dir')
                 os.makedirs(save_dir)
 
         for i in range(len(image_list)):
