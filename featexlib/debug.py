@@ -59,6 +59,7 @@ class Debug():
             return out[:,:,:,[1,0,2]]
         if mode == "b":
             return out[:,:,:,[1,2,0]]
+            
     #Load data from
     def load_data(save_dir = "Data/saved_data", name = "exported_data"):
         with open(os.path.join(save_dir, "%s.npy"%(name)), 'rb') as f:
