@@ -11,8 +11,8 @@ import os
 import re
 import sys
 
-#Importing project setup variables
-from project_setup import *
+#Importing project/machine setup variables
+from setup_project import *
 
 #To run project notebooks in subfolders as from root folder
 sys.path.append('../../' if SETUP_WORK_LOCAL else '../')
@@ -24,15 +24,28 @@ from featexlib import *
 
 
 ###ACTIVE CELL#####
-batch_size = 16      
-epochs=1
-steps_per_epoch = 4
-shuffle = False
 
-model_checkpoint = SETUP_BASE_DIR + 'models/checkpoints/scrapid_11c_256x256_unet_gpu.h5'
-save_model = SETUP_BASE_DIR + 'models/scrapid_11c_256x256_unet_gpu'
-data_dir = SETUP_BASE_DIR + "data_validation/"
-scaler_file = SETUP_BASE_DIR + 'models/scalers/scrapid_11c_256x256_819_1_unet_scaler_v1.pkl'
+if SETUP_WORK_LOCAL:
+#####Test run on local CPU
+    batch_size = 16      
+    epochs=1
+    steps_per_epoch = 4
+    shuffle = False
+
+    model_checkpoint = SETUP_BASE_DIR + 'models/checkpoints/scrapid_11c_256x256_unet_gpu.h5'
+    save_model = SETUP_BASE_DIR + 'models/scrapid_11c_256x256_unet_gpu'
+    data_dir = SETUP_BASE_DIR + "data_validation/"
+    scaler_file = SETUP_BASE_DIR + 'models/scalers/scrapid_11c_256x256_819_1_unet_scaler_v1.pkl'
+else:
+    batch_size = 16      
+    epochs=240
+    steps_per_epoch = 96 #96 steps = 24 bathces*4 runs ~2 min pro epoch.
+    shuffle = False
+
+    model_checkpoint = SETUP_BASE_DIR + 'models/checkpoints/scrapid_11c_256x256_unet_gpu.h5'
+    save_model = SETUP_BASE_DIR + 'models/scrapid_11c_256x256_unet_gpu'
+    data_dir = SETUP_BASE_DIR + "data_training/"
+    scaler_file = SETUP_BASE_DIR + 'models/scalers/scrapid_11c_256x256_819_1_unet_scaler_v1.pkl'
 
 ###Enter custom balance table if you want:
 balance_table = np.array([6, 0, 2, 1.8, 1, 1, 1, 1, 1, 1, 1])
@@ -117,6 +130,7 @@ data = DataGenerator(data_dir=data_dir,
                                 Image_generator.Mod_shift(sh_h=100, sh_v=100, rand = True, interpolation_saved = cv.INTER_NEAREST, borderValue=0, borderValue_saved=0),
                                 Image_generator.Mod_rotate(angle=180, rand = True, interpolation_saved = cv.INTER_NEAREST, borderValue=0, borderValue_saved=0),
                                 Image_generator.Mod_one_hot( SETUP_LIST_OF_CLASS_INDEXES, rgb_mode = SETUP_Y_IS_RGB, target="y"),
+                                Image_generator.Mod_merge_void(channel_num=0, target="y")
                             ]]
                         )
                     )

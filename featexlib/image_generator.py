@@ -1,5 +1,7 @@
 ###Specian class for image transformation and augmentation
 ###CLASS ORIGIN IS HERE
+#COLORS ORDER IS 'Blue-Green-Red, as in openCV
+
 
 import os
 import numpy as np
@@ -181,7 +183,7 @@ class Image_generator(object):
 
     ###Pipeline for source image dataset (x) and target (y) image dataset
     class Pipeline_x_y_images(Pipeline):
-        def __init__(self, common_layers, special_layers):
+        def __init__(self, common_layers=[], special_layers=[[]]):
             super().__init__(common_layers, special_layers)
         def __call__(self, inp_x, inp_y):
             inp_x_common = inp_x
@@ -220,6 +222,43 @@ class Image_generator(object):
             
             return result_x, result_y 
         
+    ###Pipeline parallel calculation for merging of several pipelines into one, with different xN,yN pairs
+    class Pipeline_x_y_parallel(Pipeline):
+        def __init__(self, pipelines_list, common_layers = [], special_layers = []):
+            super().__init__(common_layers, special_layers)
+            self.pipelines_list = pipelines_list
+        def __call__(self, data_list):
+            #Check if pipelei is correctly configurated
+            assert len(data_list) == len(self.pipelines_list), "Split size of the image is too big"
+
+            result_x = []
+            result_y = [] 
+
+            #data_list has form [[x0,y0],[x1,y1]...,[xN,yN]]
+            for i,v in enumerate(data_list):
+                #x,y <=> v[0],v[1]
+                if v[0] is not None and len(v[0])>0:
+                    x_, y_ = self.pipelines_list[i](v[0],v[1])
+                    result_x.append(x_)
+                    result_y.append(y_)
+            
+            return np.concatenate(result_x, axis=0), np.concatenate(result_y, axis=0) 
+
+    ###Pipeline sequential calculation for combining of several pipelines, as a chain
+    class Pipeline_x_y_sequential(Pipeline):
+        def __init__(self, pipelines_list, common_layers = [], special_layers = []):
+            super().__init__(common_layers, special_layers)
+            self.pipelines_list = pipelines_list
+        def __call__(self, *arg):
+
+            #Special trick, in case if first pipeline is parallel
+            inp_x, inp_y = self.pipelines_list[0](*arg)
+
+            for i in range(1, len(self.pipelines_list)):
+                inp_x, inp_y = self.pipelines_list[i](inp_x,inp_y)
+            
+            return inp_x, inp_y 
+
     #Base class for all tranformation layers
     class Mod(object):
         ###layer can aplies to 'x' image generation or 'y' image generation or "all"
@@ -452,13 +491,14 @@ class Image_generator(object):
 
     #Create recangle
     class Mod_add_rectangle(Mod):
-        def __init__(self, t=5.0, l=5.0, w=50, h=30, rand = False, target="y"):
+        def __init__(self, t=5.0, l=5.0, w=50, h=30, color=255, rand = False, target="y"):
             super().__init__(target=target)
             self.t = t
             self.l = l
             self.w = w
             self.h = h
             self.rand = rand 
+            self.color = color
         def calc(self, inp, trans_dict, use_saved=False):    
             yy, xx = np.mgrid[:inp.shape[1], :inp.shape[2]]
             xx = np.repeat(xx[None,...], [inp.shape[0]], axis=0)
@@ -468,7 +508,7 @@ class Image_generator(object):
             yy[yy<self.t]=0
             yy[yy>(self.t + self.h)]=0
             mask=xx*yy
-            inp[mask>0] = 255
+            inp[mask>0] = self.color
             self.trans_dict["rectangle"] = (self.t, self.l, self.w, self.h)
             trans_dict.update(self.trans_dict)
             return inp, trans_dict 
@@ -587,6 +627,21 @@ class Image_generator(object):
             else:
                 return inp[self.random], trans_dict 
 
+    ###Preprocess layer: deleting empty images by average level
+    class Mod_delete_empty_images(Mod):
+        def __init__(self, limit=0, target="all"):
+            super().__init__(target=target) 
+            self.limit = limit
+        def calc(self, inp, trans_dict, use_saved=False):
+
+            if not use_saved:
+                self.indice = inp.mean(axis=tuple(range(1,inp.ndim)))>self.limit 
+
+            self.trans_dict["delete_empty_images"] = True
+            trans_dict.update(self.trans_dict)
+
+            return inp[self.indice], trans_dict 
+
     ###Preprocess layer: One hot vector transformation 
     class Mod_one_hot(Mod):
         def __init__(self, list_of_codes, rgb_mode = False, target="y"):
@@ -596,10 +651,11 @@ class Image_generator(object):
 
         def calc(self, inp, trans_dict, use_saved=False):
             self.trans_dict["one_hot"] = True
-
+            trans_dict.update(self.trans_dict)
             y_colors = np.array([])
             if self.rgb_mode:
-                y_colors = (inp[:,:,:,0]*65536+inp[:,:,:,1]*256+inp[:,:,:,2])[...,None] 
+                #Using OpenCV colors order: Blue-Green-Red
+                y_colors = (inp[:,:,:,2]*65536+inp[:,:,:,1]*256+inp[:,:,:,0])[...,None] 
             else:
                 if len(inp.shape) < 4:
                     y_colors = inp.reshape(-1,inp.shape[-2],inp.shape[-1],1)
@@ -610,21 +666,35 @@ class Image_generator(object):
                 out.append((y_colors==c).astype(int)) 
             return np.concatenate(out, axis=3), trans_dict
 
+    ###Preprocess layer: Merge void zones to one specific layer. Default value 
+    class Mod_merge_void(Mod):
+        def __init__(self, channel_num = 0, target="y"):
+            super().__init__(target=target) 
+            self.channel_num = channel_num
+
+        def calc(self, inp, trans_dict, use_saved=False):
+            self.trans_dict["merge_void"] = self.channel_num
+            trans_dict.update(self.trans_dict)
+            #Add void zones (without any mapped classes) to specific channel
+            inp[...,self.channel_num] = np.equal(np.sum(inp, axis=-1), 0).astype(inp.dtype) + inp[...,self.channel_num]
+            return inp, trans_dict
+
     ###Making RBG y pics from one hot coded multichannel data
     def one_hot_to_rgb(inp, list_of_codes_colors):
-        #Help function to get RGB codes from DEC
-        list_of_colors = np.array([[i//65536,(i - 65536*(i//65536))//256, i - 65536*(i//65536) - 256*((i - 65536*(i//65536))//256)] for i in list_of_codes_colors]).astype(np.uint8)
-
+        #Using OpenCV colors order: Blue-Green-Red
+        #Help function to get BGR codes from DEC
+        list_of_colors = np.array([[i - 65536*(i//65536) - 256*((i - 65536*(i//65536))//256), (i - 65536*(i//65536))//256, i//65536] for i in list_of_codes_colors]).astype(np.uint8)
         res_r = np.argmax(inp, axis=3)
         res_g = np.copy(res_r)
         res_b = np.copy(res_r)
 
         for c in range(inp.shape[-1]):
-            res_r[res_r == c] =  list_of_colors[c,0]
-            res_g[res_g == c] =  list_of_colors[c,1]
-            res_b[res_b == c] =  list_of_colors[c,2]
+            res_r[res_r == c] =  list_of_colors[c,2] #2-channel is RED
+            res_g[res_g == c] =  list_of_colors[c,1] #1-channel is GREEN
+            res_b[res_b == c] =  list_of_colors[c,0] #0-channel is BLUE
 
-        return np.concatenate([res_r[...,None],res_g[...,None],res_b[...,None]], axis=3)
+        #Using OpenCV colors order: Blue-Green-Red
+        return np.concatenate([res_b[...,None],res_g[...,None],res_r[...,None]], axis=3)
 
     #Shuffle both arrays X and Y together and outputs them reshuffled
     def shuffle_x_y(self, inp_x, inp_y):   
